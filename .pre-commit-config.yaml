@@ -1,0 +1,28 @@
+repos:
+  # Generic pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.9
+    hooks:
+      - id: ruff
+        name: ruff-lint
+        args: [--fix]
+      - id: ruff-format
+        name: ruff-format
+
+  - repo: local
+    hooks:
+      - id: typecheck
+        name: ty Type Check (Backend)
+        entry: bash -c 'uv run ty check'
+        language: system
+        files: ^.*\.py$
+        pass_filenames: false
