@@ -1,0 +1,66 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened]  # Only run automatically when PR is first created
+  workflow_dispatch:  # Allow manual triggering from GitHub UI
+    inputs:
+      custom_prompt:
+        description: 'Custom prompt to use instead of the default (leave empty for default)'
+        required: false
+        type: string
+      additional_context:
+        description: 'Additional context to append to the default prompt'
+        required: false
+        type: string
+
+jobs:
+  claude-review:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.login == 'mattjmcnaughton'
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Fetch default prompt
+        id: fetch-prompt
+        run: |
+          DEFAULT_PROMPT=$(curl -fsSL http://mattjmcnaughton.com/artifacts/prompts/review-code.md)
+          echo "default_prompt<<EOF" >> $GITHUB_OUTPUT
+          echo "$DEFAULT_PROMPT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are running as part of a GitHub Actions workflow for code review.
+
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            ACTION RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            PROMPT SOURCE: http://mattjmcnaughton.com/artifacts/prompts/review-code.md
+            MANUAL TRIGGER: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/claude-code-review.yml
+
+            ${{ inputs.custom_prompt || steps.fetch-prompt.outputs.default_prompt }}
+
+            ${{ inputs.additional_context && format('ADDITIONAL CONTEXT: {0}', inputs.additional_context) || '' }}
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            At the end of your comment, include a "Details" section with links to:
+            - ACTION RUN (full logs for this review)
+            - PROMPT SOURCE (the review prompt used)
+            - MANUAL TRIGGER (how to re-run or customize the review)
+
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
