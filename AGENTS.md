@@ -2,6 +2,9 @@
 
 This document guides AI agents and contributors.
 
+## Dev Workflow
+- The `justfile` documents the canonical commands for installing dependencies, running tests, linting, and other development tasks—prefer using these recipes to stay aligned with the project workflow.
+
 ## Repository Shape
 - Place command-line entrypoints under `commands/`.
 - Keep reusable domain models and Pydantic schemas in `models/`.
@@ -29,6 +32,7 @@ This document guides AI agents and contributors.
 - Prefer functions/methods of roughly 10–40 lines that do one thing; extract helpers for clarity.
 - Maintain comprehensive type annotations (inputs, outputs, attributes).
 - Avoid trivial comments; reserve them for nuanced rationale or non-obvious decisions.
+- We are using Python 3.12+ (i.e. there is no need for `from __future__ import annotations`)
 
 ## Testing Strategy
 - Follow the pyramid: unit > integration > e2e.
