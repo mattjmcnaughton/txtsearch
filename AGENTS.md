@@ -33,6 +33,13 @@ This document guides AI agents and contributors.
 - Maintain comprehensive type annotations (inputs, outputs, attributes).
 - Avoid trivial comments; reserve them for nuanced rationale or non-obvious decisions.
 - We are using Python 3.12+ (i.e. there is no need for `from __future__ import annotations`)
+- Do not use `__all__` declarations in modules; keep exports implicit.
+
+## Async
+- Services performing I/O (file reading, network calls) should be async.
+- Use `asyncio.to_thread()` to wrap synchronous/blocking I/O operations (e.g., file reads, directory traversal).
+- Async generators (`AsyncIterator`) are preferred for streaming results.
+- Tests use pytest-asyncio with `asyncio_mode = "auto"` (no need for `@pytest.mark.asyncio`).
 
 ## Testing Strategy
 - Follow the pyramid: unit > integration > e2e.
@@ -40,3 +47,4 @@ This document guides AI agents and contributors.
 - Integration tests (`tests/integration/...`) exercise component interactions or real external systems; mark with `@pytest.mark.slow` and/or `@pytest.mark.external` as needed.
 - End-to-end tests (`tests/e2e/...`) cover core workflows spanning commands/services/adapters.
 - Reuse fixtures that spin up in-memory databases, fake LiteLLM clients, or temp directories to keep tests deterministic.
+- Use class-based test organization; group related tests into classes (e.g., `TestFileWalkerPatternMatching`, `TestFileWalkerErrorHandling`).
