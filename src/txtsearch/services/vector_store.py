@@ -2,11 +2,17 @@
 
 ChromaDB's Python client is synchronous, so we use asyncio.to_thread()
 to wrap blocking operations and maintain async consistency with other services.
+
+Embedding generation is handled by ChromaDB via an injected embedding function.
+By default, ChromaDB uses sentence-transformers (all-MiniLM-L6-v2) for local
+embedding generation. Alternative embedding functions can be injected for
+different providers (OpenAI, Cohere, etc.) or testing.
 """
 
 import asyncio
 
 import chromadb
+from chromadb.api.types import EmbeddingFunction, Embeddable
 import structlog
 
 
@@ -16,6 +22,10 @@ class VectorStore:
     Wraps ChromaDB operations with async interface using asyncio.to_thread().
     Accepts a ChromaDB Client via dependency injection to support both
     persistent (PersistentClient) and ephemeral (EphemeralClient) modes.
+
+    Embedding generation is delegated to ChromaDB via an optional embedding
+    function. If not provided, ChromaDB uses its default (sentence-transformers
+    all-MiniLM-L6-v2).
     """
 
     DEFAULT_COLLECTION_NAME = "chunks"
@@ -24,10 +34,12 @@ class VectorStore:
         self,
         client: chromadb.ClientAPI,
         collection_name: str | None = None,
+        embedding_function: EmbeddingFunction[Embeddable] | None = None,
         logger: structlog.stdlib.BoundLogger | None = None,
     ) -> None:
         self._client = client
         self._collection_name = collection_name or self.DEFAULT_COLLECTION_NAME
+        self._embedding_function = embedding_function
         self._logger = logger or structlog.get_logger(__name__)
         self._collection: chromadb.Collection | None = None
 
@@ -36,6 +48,7 @@ class VectorStore:
         self._collection = await asyncio.to_thread(
             self._client.get_or_create_collection,
             name=self._collection_name,
+            embedding_function=self._embedding_function,
         )
         self._logger.info(
             "vector_store_initialized",
@@ -87,6 +100,50 @@ class VectorStore:
             count=len(ids),
         )
 
+    async def add_documents(
+        self,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict[str, str | int | float | bool]] | None = None,
+    ) -> None:
+        """Add documents to the collection, letting ChromaDB generate embeddings.
+
+        This method delegates embedding generation to the collection's configured
+        embedding function. If no embedding function was provided at initialization,
+        ChromaDB uses its default (sentence-transformers all-MiniLM-L6-v2).
+
+        Args:
+            ids: Unique identifiers for each document (typically chunk_id).
+            documents: Text content to be embedded and stored.
+            metadatas: Optional metadata dicts for each document.
+
+        Raises:
+            ValueError: If input lists have mismatched lengths.
+            RuntimeError: If collection not initialized.
+        """
+        if self._collection is None:
+            raise RuntimeError("VectorStore not initialized. Call initialize() first.")
+
+        if not ids:
+            return
+
+        if len(ids) != len(documents):
+            raise ValueError(f"Mismatched lengths: ids={len(ids)}, documents={len(documents)}")
+        if metadatas is not None and len(metadatas) != len(ids):
+            raise ValueError(f"Mismatched lengths: ids={len(ids)}, metadatas={len(metadatas)}")
+
+        await asyncio.to_thread(
+            self._collection.upsert,
+            ids=ids,
+            documents=documents,
+            metadatas=metadatas,
+        )
+        self._logger.debug(
+            "documents_added",
+            collection=self._collection_name,
+            count=len(ids),
+        )
+
     async def delete_by_ids(self, ids: list[str]) -> None:
         """Delete embeddings by their IDs.
 
@@ -122,6 +179,7 @@ class VectorStore:
         self._collection = await asyncio.to_thread(
             self._client.get_or_create_collection,
             name=self._collection_name,
+            embedding_function=self._embedding_function,
         )
         self._logger.info(
             "collection_cleared",
