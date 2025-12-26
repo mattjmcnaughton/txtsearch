@@ -22,7 +22,7 @@ def test_query_filters_validate_inputs() -> None:
     filters = QueryFilters(
         document_ids=[doc_id],
         source_types={SourceType.FILE},
-        metadata_eq={"language": "en"},
+        extra_eq={"language": "en"},
         ingested_after=datetime.now(timezone.utc),
     )
     query = Query(

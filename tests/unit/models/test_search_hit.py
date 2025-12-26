@@ -23,7 +23,7 @@ def test_search_hit_valid_payload() -> None:
         strategy=SearchStrategy.SEMANTIC,
         snippet="example snippet",
         highlights=[highlight],
-        metadata={"distance": 0.45},
+        extra={"distance": 0.45},
     )
 
     UUID(hit.hit_id)
@@ -56,7 +56,7 @@ def test_search_hit_round_trip() -> None:
         rank=1,
         score=0.9,
         strategy=SearchStrategy.LEXICAL,
-        metadata={"score_raw": 42.0},
+        extra={"score_raw": 42.0},
     )
 
     restored = SearchHit.from_record(hit.to_record())

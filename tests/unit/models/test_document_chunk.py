@@ -29,7 +29,7 @@ def test_chunk_basic_validation() -> None:
     )
 
     assert chunk.schema_version == DocumentChunk.SCHEMA_VERSION
-    assert chunk.metadata == {}
+    assert chunk.extra == {}
     assert chunk.char_end >= chunk.char_start
 
 
@@ -90,7 +90,7 @@ def test_chunk_record_round_trip() -> None:
         char_end=27,
         line_start=2,
         line_end=3,
-        metadata={"section": "intro"},
+        extra={"section": "intro"},
     )
 
     restored = DocumentChunk.from_record(chunk.to_record())
