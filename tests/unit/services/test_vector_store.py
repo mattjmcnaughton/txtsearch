@@ -3,15 +3,44 @@
 from uuid import uuid4
 
 import chromadb
+from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
 import pytest
 
 from txtsearch.services.vector_store import VectorStore
+
+
+class FakeEmbeddingFunction(EmbeddingFunction[Documents]):
+    """Deterministic embedding function for testing.
+
+    Generates embeddings based on document length to produce
+    consistent, predictable vectors without external dependencies.
+    """
+
+    def __init__(self, dim: int = 384) -> None:
+        self.dim = dim
+        self.call_count = 0
+
+    def __call__(self, input: Documents) -> Embeddings:
+        self.call_count += 1
+        embeddings: Embeddings = []
+        for doc in input:
+            # Generate deterministic embedding based on document content
+            seed = len(doc) * 0.001
+            embedding = [seed + (i * 0.0001) for i in range(self.dim)]
+            embeddings.append(embedding)
+        return embeddings
 
 
 @pytest.fixture
 def ephemeral_client() -> chromadb.ClientAPI:
     """Create an ephemeral ChromaDB client for testing."""
     return chromadb.EphemeralClient()
+
+
+@pytest.fixture
+def fake_embedding_function() -> FakeEmbeddingFunction:
+    """Create a fake embedding function for testing."""
+    return FakeEmbeddingFunction()
 
 
 @pytest.fixture
@@ -22,6 +51,25 @@ async def store(ephemeral_client: chromadb.ClientAPI) -> VectorStore:
     """
     collection_name = f"test_{uuid4().hex[:8]}"
     store = VectorStore(client=ephemeral_client, collection_name=collection_name)
+    await store.initialize()
+    return store
+
+
+@pytest.fixture
+async def store_with_fake_embeddings(
+    ephemeral_client: chromadb.ClientAPI,
+    fake_embedding_function: FakeEmbeddingFunction,
+) -> VectorStore:
+    """Create a VectorStore with a fake embedding function.
+
+    Uses a unique collection name per test to ensure isolation.
+    """
+    collection_name = f"test_{uuid4().hex[:8]}"
+    store = VectorStore(
+        client=ephemeral_client,
+        collection_name=collection_name,
+        embedding_function=fake_embedding_function,
+    )
     await store.initialize()
     return store
 
@@ -292,3 +340,144 @@ class TestVectorStoreCount:
 
         with pytest.raises(RuntimeError, match="not initialized"):
             await store.count()
+
+
+class TestVectorStoreAddDocuments:
+    """Tests for adding documents with automatic embedding generation."""
+
+    async def test_add_single_document(self, store_with_fake_embeddings: VectorStore) -> None:
+        await store_with_fake_embeddings.add_documents(
+            ids=["chunk-1"],
+            documents=["This is the text content."],
+        )
+
+        count = await store_with_fake_embeddings.count()
+        assert count == 1
+
+    async def test_add_multiple_documents(self, store_with_fake_embeddings: VectorStore) -> None:
+        await store_with_fake_embeddings.add_documents(
+            ids=["chunk-1", "chunk-2", "chunk-3"],
+            documents=["Text one.", "Text two.", "Text three."],
+        )
+
+        count = await store_with_fake_embeddings.count()
+        assert count == 3
+
+    async def test_add_documents_with_metadata(self, store_with_fake_embeddings: VectorStore) -> None:
+        await store_with_fake_embeddings.add_documents(
+            ids=["chunk-1"],
+            documents=["Sample text."],
+            metadatas=[{"document_id": "doc-1", "chunk_index": 0}],
+        )
+
+        result = await store_with_fake_embeddings.get_by_ids(["chunk-1"])
+        assert result["metadatas"][0]["document_id"] == "doc-1"
+        assert result["metadatas"][0]["chunk_index"] == 0
+
+    async def test_add_documents_empty_list_does_nothing(self, store_with_fake_embeddings: VectorStore) -> None:
+        await store_with_fake_embeddings.add_documents(ids=[], documents=[])
+        count = await store_with_fake_embeddings.count()
+        assert count == 0
+
+    async def test_add_documents_upserts_existing(self, store_with_fake_embeddings: VectorStore) -> None:
+        await store_with_fake_embeddings.add_documents(
+            ids=["chunk-1"],
+            documents=["Original text."],
+        )
+
+        # Update with same ID
+        await store_with_fake_embeddings.add_documents(
+            ids=["chunk-1"],
+            documents=["Updated text."],
+        )
+
+        count = await store_with_fake_embeddings.count()
+        assert count == 1
+
+        result = await store_with_fake_embeddings.get_by_ids(["chunk-1"])
+        assert result["documents"][0] == "Updated text."
+
+    async def test_add_documents_raises_on_mismatched_lengths(self, store_with_fake_embeddings: VectorStore) -> None:
+        with pytest.raises(ValueError, match="Mismatched lengths"):
+            await store_with_fake_embeddings.add_documents(
+                ids=["chunk-1", "chunk-2"],
+                documents=["Only one document."],
+            )
+
+    async def test_add_documents_raises_on_mismatched_metadata_length(
+        self, store_with_fake_embeddings: VectorStore
+    ) -> None:
+        with pytest.raises(ValueError, match="Mismatched lengths"):
+            await store_with_fake_embeddings.add_documents(
+                ids=["chunk-1", "chunk-2"],
+                documents=["Text one.", "Text two."],
+                metadatas=[{"key": "value"}],  # Only one metadata dict
+            )
+
+    async def test_add_documents_raises_when_not_initialized(self, ephemeral_client: chromadb.ClientAPI) -> None:
+        store = VectorStore(client=ephemeral_client)
+
+        with pytest.raises(RuntimeError, match="not initialized"):
+            await store.add_documents(ids=["chunk-1"], documents=["Text."])
+
+    async def test_add_documents_generates_embeddings(
+        self,
+        store_with_fake_embeddings: VectorStore,
+        fake_embedding_function: FakeEmbeddingFunction,
+    ) -> None:
+        await store_with_fake_embeddings.add_documents(
+            ids=["chunk-1"],
+            documents=["Test document."],
+        )
+
+        # Verify embedding was generated
+        result = await store_with_fake_embeddings.get_by_ids(["chunk-1"])
+        assert result["embeddings"] is not None
+        assert len(result["embeddings"][0]) == fake_embedding_function.dim
+
+
+class TestVectorStoreEmbeddingFunction:
+    """Tests for custom embedding function injection."""
+
+    async def test_uses_injected_embedding_function(
+        self,
+        ephemeral_client: chromadb.ClientAPI,
+        fake_embedding_function: FakeEmbeddingFunction,
+    ) -> None:
+        collection_name = f"test_{uuid4().hex[:8]}"
+        store = VectorStore(
+            client=ephemeral_client,
+            collection_name=collection_name,
+            embedding_function=fake_embedding_function,
+        )
+        await store.initialize()
+
+        await store.add_documents(
+            ids=["chunk-1"],
+            documents=["Test document."],
+        )
+
+        # Verify the fake embedding function was called
+        assert fake_embedding_function.call_count >= 1
+
+    async def test_embedding_function_preserved_after_clear(
+        self,
+        ephemeral_client: chromadb.ClientAPI,
+        fake_embedding_function: FakeEmbeddingFunction,
+    ) -> None:
+        collection_name = f"test_{uuid4().hex[:8]}"
+        store = VectorStore(
+            client=ephemeral_client,
+            collection_name=collection_name,
+            embedding_function=fake_embedding_function,
+        )
+        await store.initialize()
+
+        await store.add_documents(ids=["chunk-1"], documents=["Text one."])
+        await store.clear_collection()
+
+        # Should still work after clear
+        await store.add_documents(ids=["chunk-2"], documents=["Text two."])
+
+        count = await store.count()
+        assert count == 1
