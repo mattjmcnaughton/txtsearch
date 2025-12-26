@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from txtsearch.models.base import (
     RecordModel,
-    ensure_metadata_dict,
+    ensure_extra_dict,
     ensure_uuid_str,
 )
 from txtsearch.models.enums import SearchStrategy
@@ -42,7 +42,7 @@ class SearchHit(RecordModel):
     strategy: SearchStrategy
     snippet: str | None = None
     highlights: list[Highlight] | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("hit_id", "query_id", "document_id", "chunk_id", mode="before")
     @classmethod
@@ -51,10 +51,10 @@ class SearchHit(RecordModel):
             return None
         return ensure_uuid_str(value)
 
-    @field_validator("metadata", mode="before")
+    @field_validator("extra", mode="before")
     @classmethod
-    def _normalize_metadata(cls, value: Any) -> dict[str, Any]:
-        return ensure_metadata_dict(value)
+    def _normalize_extra(cls, value: Any) -> dict[str, Any]:
+        return ensure_extra_dict(value)
 
     @field_validator("highlights", mode="before")
     @classmethod
@@ -70,6 +70,3 @@ class SearchHit(RecordModel):
         if self.score is not None and not (0.0 <= self.score <= 1.0):
             raise ValueError("score must be between 0 and 1")
         return self
-
-
-__all__ = ["SearchHit", "Highlight"]

@@ -24,7 +24,7 @@ def test_document_has_expected_defaults() -> None:
     )
 
     assert document.schema_version == Document.SCHEMA_VERSION
-    assert document.metadata == {}
+    assert document.extra == {}
     assert document.to_record()["schema_version"] == Document.SCHEMA_VERSION
 
 
@@ -63,7 +63,7 @@ def test_document_record_round_trip() -> None:
         size_bytes=1,
         source_type=SourceType.FILE,
         ingested_at=datetime.now(timezone.utc),
-        metadata={"language": "en"},
+        extra={"language": "en"},
     )
 
     restored = Document.from_record(document.to_record())

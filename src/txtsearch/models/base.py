@@ -78,9 +78,9 @@ def ensure_non_empty_text(value: str, field_name: str) -> str:
     return value
 
 
-def ensure_metadata_dict(value: Any) -> dict[str, Any]:
+def ensure_extra_dict(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, dict):
         return value
-    raise TypeError("metadata must be a dictionary")
+    raise TypeError("extra must be a dictionary")

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from txtsearch.models.base import (
     RecordModel,
-    ensure_metadata_dict,
+    ensure_extra_dict,
     ensure_non_empty_text,
     ensure_timezone_aware,
     ensure_uuid_str,
@@ -17,7 +17,7 @@ from txtsearch.models.enums import SearchStrategy, SourceType
 class QueryFilters(BaseModel):
     document_ids: list[str] | None = None
     source_types: set[SourceType] | None = None
-    metadata_eq: dict[str, Any] | None = None
+    extra_eq: dict[str, Any] | None = None
     ingested_after: datetime | None = None
 
     model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
@@ -29,12 +29,12 @@ class QueryFilters(BaseModel):
             return None
         return [ensure_uuid_str(item) for item in value]
 
-    @field_validator("metadata_eq", mode="before")
+    @field_validator("extra_eq", mode="before")
     @classmethod
-    def _normalize_metadata(cls, value: Any) -> dict[str, Any] | None:
+    def _normalize_extra_eq(cls, value: Any) -> dict[str, Any] | None:
         if value is None:
             return None
-        return ensure_metadata_dict(value)
+        return ensure_extra_dict(value)
 
     @field_validator("ingested_after", mode="before")
     @classmethod
@@ -53,7 +53,7 @@ class QueryFilters(BaseModel):
             for value in (
                 self.document_ids,
                 self.source_types,
-                self.metadata_eq,
+                self.extra_eq,
                 self.ingested_after,
             )
         )
@@ -89,6 +89,3 @@ class Query(RecordModel):
         if value is None:
             return QueryFilters()
         return QueryFilters.model_validate(value)
-
-
-__all__ = ["Query", "QueryFilters"]

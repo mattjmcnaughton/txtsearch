@@ -36,10 +36,22 @@ This document guides AI agents and contributors.
 - Do not use `__all__` declarations in modules; keep exports implicit.
 
 ## Async
-- Services performing I/O (file reading, network calls) should be async.
+- Services performing I/O (file reading, network calls, database) should be async.
 - Use `asyncio.to_thread()` to wrap synchronous/blocking I/O operations (e.g., file reads, directory traversal).
+- For database operations, use native async with `aiosqlite` and SQLAlchemy's async support:
+  - Use `create_async_engine("sqlite+aiosqlite:///path.db")` for async engines.
+  - Use `AsyncSession` from `sqlalchemy.ext.asyncio` for queries.
+  - Schema creation requires `run_sync`: `await conn.run_sync(SQLModel.metadata.create_all)`.
 - Async generators (`AsyncIterator`) are preferred for streaming results.
 - Tests use pytest-asyncio with `asyncio_mode = "auto"` (no need for `@pytest.mark.asyncio`).
+
+## Database & SQLModel
+- Keep SQLModel table classes (`table=True`) separate from Pydantic domain models in `models/tables.py`.
+- Domain models are frozen/immutable; table models need mutability for ORM operations.
+- Avoid field name `metadata` in table models (reserved by SQLAlchemy); use `extra` instead.
+- Use SQLAlchemy's `JSON` type (`sa_type=JSON`) for dict fields to enable native serialization.
+- Convert between domain and table models using `.model_dump()` / `.model_validate()`.
+- SQLite does not preserve timezone info; restore UTC when reading datetime fields.
 
 ## Testing Strategy
 - Follow the pyramid: unit > integration > e2e.

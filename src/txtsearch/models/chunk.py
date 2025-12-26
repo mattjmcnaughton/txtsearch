@@ -4,8 +4,8 @@ from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from txtsearch.models.base import (
     RecordModel,
+    ensure_extra_dict,
     ensure_hex_digest,
-    ensure_metadata_dict,
     ensure_non_empty_text,
     ensure_uuid_str,
 )
@@ -25,7 +25,7 @@ class DocumentChunk(RecordModel):
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
     token_count: int | None = Field(default=None, ge=0)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    extra: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("chunk_id", "document_id", mode="before")
     @classmethod
@@ -42,10 +42,10 @@ class DocumentChunk(RecordModel):
     def _validate_hash(cls, value: Any) -> str:
         return ensure_hex_digest(value)
 
-    @field_validator("metadata", mode="before")
+    @field_validator("extra", mode="before")
     @classmethod
-    def _normalize_metadata(cls, value: Any) -> dict[str, Any]:
-        return ensure_metadata_dict(value)
+    def _normalize_extra(cls, value: Any) -> dict[str, Any]:
+        return ensure_extra_dict(value)
 
     @model_validator(mode="after")
     def _validate_offsets(self) -> "DocumentChunk":
@@ -54,6 +54,3 @@ class DocumentChunk(RecordModel):
         if self.line_end < self.line_start:
             raise ValueError("line_end must be greater than or equal to line_start")
         return self
-
-
-__all__ = ["DocumentChunk"]
