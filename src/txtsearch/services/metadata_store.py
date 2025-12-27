@@ -33,6 +33,11 @@ class MetadataStore:
         self._engine = engine
         self._logger = logger or structlog.get_logger(__name__)
 
+    async def close(self) -> None:
+        """Close the database engine and release connections."""
+        await self._engine.dispose()
+        self._logger.debug("metadata_store_closed")
+
     async def initialize_schema(self) -> None:
         """Create database tables if they don't exist."""
         async with self._engine.begin() as conn:

@@ -42,8 +42,10 @@ This document guides AI agents and contributors.
   - Use `create_async_engine("sqlite+aiosqlite:///path.db")` for async engines.
   - Use `AsyncSession` from `sqlalchemy.ext.asyncio` for queries.
   - Schema creation requires `run_sync`: `await conn.run_sync(SQLModel.metadata.create_all)`.
+  - Always call `await engine.dispose()` when done; without this, the process will hang.
 - Async generators (`AsyncIterator`) are preferred for streaming results.
 - Tests use pytest-asyncio with `asyncio_mode = "auto"` (no need for `@pytest.mark.asyncio`).
+- Services managing resources (database connections, clients) should implement async context managers (`__aenter__`/`__aexit__`) to ensure cleanup on exit or exception.
 
 ## Database & SQLModel
 - Keep SQLModel table classes (`table=True`) separate from Pydantic domain models in `models/tables.py`.

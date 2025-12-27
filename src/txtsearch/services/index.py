@@ -64,6 +64,23 @@ class IndexingService:
         self._chunker = chunker
         self._logger = logger or structlog.get_logger(__name__)
 
+    async def close(self) -> None:
+        """Close all resources and release connections."""
+        await self._metadata_store.close()
+
+    async def __aenter__(self) -> "IndexingService":
+        """Enter async context."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Exit async context, ensuring resources are cleaned up."""
+        await self.close()
+
     async def index_directory(self, directory: Path) -> IndexingResult:
         """Index all matching files in a directory.
 
@@ -180,10 +197,11 @@ class IndexingService:
         """Create a Document model from file path and content."""
         content_hash = hashlib.sha256(content.encode()).hexdigest()
         stat = file_path.stat()
+        absolute_path = file_path.resolve()
 
         return Document(
             document_id=str(uuid4()),
-            uri=file_path.as_uri(),
+            uri=absolute_path.as_uri(),
             display_name=file_path.name,
             content_hash=content_hash,
             size_bytes=stat.st_size,
