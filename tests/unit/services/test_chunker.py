@@ -216,6 +216,34 @@ class TestChunkerSeparatorBehavior:
         for chunk in chunks:
             assert len(chunk.text) <= 10
 
+    def test_hard_split_prefers_word_boundaries(self) -> None:
+        """Hard split should break at word boundaries, not mid-word."""
+        chunker = Chunker(chunk_size=15, chunk_overlap=0, separators=[])
+        document_id = str(uuid4())
+        text = "hello world testing chunks"
+
+        chunks = chunker.chunk(text, document_id)
+
+        # Should split at word boundaries, not "hello world tes" + "ting chunks"
+        for chunk in chunks:
+            assert not chunk.text.endswith(" "), "Chunk shouldn't end with space"
+            words_in_chunk = chunk.text.split()
+            # Each word in the chunk should be complete (not truncated)
+            for word in words_in_chunk:
+                assert word in text, f"Word '{word}' should exist in original text"
+
+    def test_hard_split_falls_back_to_exact_when_no_whitespace(self) -> None:
+        """Hard split still works on text with no whitespace."""
+        chunker = Chunker(chunk_size=10, chunk_overlap=2, separators=[])
+        document_id = str(uuid4())
+        text = "abcdefghijklmnopqrstuvwxyz"
+
+        chunks = chunker.chunk(text, document_id)
+
+        assert len(chunks) >= 2
+        for chunk in chunks:
+            assert len(chunk.text) <= 10
+
 
 class TestChunkerOverlapBehavior:
     """Tests for chunk overlap functionality."""

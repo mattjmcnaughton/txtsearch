@@ -117,17 +117,30 @@ class Chunker:
         return chunks
 
     def _hard_split(self, text: str) -> list[str]:
-        """Split text at exact character boundaries when no separator works."""
+        """Split text at word boundaries when possible, exact boundaries otherwise."""
         chunks: list[str] = []
         start = 0
         step = self._chunk_size - self._chunk_overlap
 
         while start < len(text):
             end = min(start + self._chunk_size, len(text))
-            chunk = text[start:end]
-            if chunk.strip():
+
+            # If not at text end and not at whitespace, find word boundary
+            if end < len(text) and not text[end].isspace():
+                boundary = end
+                while boundary > start and not text[boundary].isspace():
+                    boundary -= 1
+
+                # Only use boundary if found (not back at start)
+                if boundary > start:
+                    end = boundary
+
+            chunk = text[start:end].strip()
+            if chunk:
                 chunks.append(chunk)
-            start += step
+
+            # Step forward, accounting for adjusted end position
+            start = max(start + step, end - self._chunk_overlap) if end > start else start + step
 
         return chunks
 

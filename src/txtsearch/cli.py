@@ -4,6 +4,7 @@ Provides indexing and search commands for directories with semantic search,
 llm.txt style search, and grep-based search capabilities.
 """
 
+import asyncio
 import sys
 from enum import Enum
 from pathlib import Path
@@ -11,6 +12,9 @@ from typing import Optional
 
 import structlog
 import typer
+
+from txtsearch.services.factory import create_indexing_service, parse_file_pattern
+from txtsearch.services.index import IndexingResult
 
 
 class SearchStrategy(str, Enum):
@@ -90,16 +94,28 @@ def index(
 
     index_dir = Path(output_dir) if output_dir else target_dir / ".txtsearch"
 
-    logger.info(
-        "starting_indexing",
-        directory=str(target_dir),
-        index_dir=str(index_dir),
-        file_pattern=file_pattern,
-    )
+    include_patterns = parse_file_pattern(file_pattern) if file_pattern else None
+    exclude_patterns = parse_file_pattern(exclude) if exclude else None
 
-    # TODO: Implement indexing functionality
-    typer.echo(f"Indexing {target_dir} -> {index_dir}")
-    typer.echo("Indexing functionality will be implemented here.")
+    async def run_indexing() -> IndexingResult:
+        async with create_indexing_service(
+            output_dir=index_dir,
+            include_patterns=include_patterns,
+            exclude_patterns=exclude_patterns,
+        ) as service:
+            return await service.index_directory(target_dir)
+
+    result = asyncio.run(run_indexing())
+
+    if result.errors:
+        for error in result.errors:
+            logger.warning("indexing_error", error=error)
+
+    typer.echo(
+        f"Indexed {result.files_processed} files ({result.chunks_created} chunks, {result.files_skipped} skipped)"
+    )
+    if result.errors:
+        typer.echo(f"Encountered {len(result.errors)} errors")
 
 
 @app.command()
