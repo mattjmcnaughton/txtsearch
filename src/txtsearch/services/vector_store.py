@@ -10,10 +10,23 @@ different providers (OpenAI, Cohere, etc.) or testing.
 """
 
 import asyncio
+from typing import Any
 
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Embeddable
+from pydantic import BaseModel, ConfigDict
 import structlog
+
+
+class VectorQueryResult(BaseModel):
+    """Result of a vector similarity query."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ids: list[str]
+    documents: list[str]
+    metadatas: list[dict[str, Any]]
+    distances: list[float]
 
 
 class VectorStore:
@@ -224,3 +237,58 @@ class VectorStore:
             include=["embeddings", "documents", "metadatas"],
         )
         return result
+
+    async def query(
+        self,
+        query_texts: list[str],
+        n_results: int = 10,
+        where: dict[str, Any] | None = None,
+    ) -> list[VectorQueryResult]:
+        """Query the collection for similar documents.
+
+        Args:
+            query_texts: List of query strings to find similar documents for.
+            n_results: Number of results to return per query.
+            where: Optional ChromaDB metadata filter dict.
+
+        Returns:
+            List of VectorQueryResult, one per query text. Each result contains
+            ids, documents, metadatas, and distances for the nearest neighbors.
+
+        Raises:
+            RuntimeError: If collection not initialized.
+        """
+        if self._collection is None:
+            raise RuntimeError("VectorStore not initialized. Call initialize() first.")
+
+        if not query_texts:
+            return []
+
+        raw_result = await asyncio.to_thread(
+            self._collection.query,
+            query_texts=query_texts,
+            n_results=n_results,
+            where=where,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        results: list[VectorQueryResult] = []
+        for i in range(len(query_texts)):
+            results.append(
+                VectorQueryResult(
+                    ids=raw_result["ids"][i] if raw_result["ids"] else [],
+                    documents=raw_result["documents"][i] if raw_result["documents"] else [],
+                    metadatas=raw_result["metadatas"][i] if raw_result["metadatas"] else [],
+                    distances=raw_result["distances"][i] if raw_result["distances"] else [],
+                )
+            )
+
+        self._logger.debug(
+            "vector_query_executed",
+            collection=self._collection_name,
+            query_count=len(query_texts),
+            n_results=n_results,
+            has_filter=where is not None,
+        )
+
+        return results

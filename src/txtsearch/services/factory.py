@@ -1,4 +1,4 @@
-"""Factory functions for creating and wiring indexing services.
+"""Factory functions for creating and wiring services.
 
 Provides production factories that create services with persistent storage
 and test factories that use in-memory stores for fast, isolated testing.
@@ -13,9 +13,15 @@ from txtsearch.services.chunker import Chunker
 from txtsearch.services.file_walker import FileWalker
 from txtsearch.services.index import IndexingService
 from txtsearch.services.metadata_store import MetadataStore, create_async_engine_from_path
+from txtsearch.services.semantic_search import SemanticSearchService
 from txtsearch.services.vector_store import VectorStore
 
 _TEST_COLLECTION_ID_LENGTH = 8
+
+# Storage path constants
+METADATA_DB_FILENAME = "meta.db"
+VECTOR_STORE_DIRNAME = "semantic"
+DEFAULT_COLLECTION_NAME = "chunks"
 
 
 def create_indexing_service(
@@ -24,7 +30,7 @@ def create_indexing_service(
     exclude_patterns: list[str] | None = None,
     chunk_size: int = 512,
     chunk_overlap: int = 50,
-    collection_name: str = "chunks",
+    collection_name: str = DEFAULT_COLLECTION_NAME,
 ) -> IndexingService:
     """Create a production IndexingService with persistent storage.
 
@@ -46,11 +52,11 @@ def create_indexing_service(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    db_path = output_dir / "meta.db"
+    db_path = output_dir / METADATA_DB_FILENAME
     engine = create_async_engine_from_path(str(db_path))
     metadata_store = MetadataStore(engine=engine, logger=logger)
 
-    chroma_path = output_dir / "semantic"
+    chroma_path = output_dir / VECTOR_STORE_DIRNAME
     chroma_client = chromadb.PersistentClient(path=str(chroma_path))
     vector_store = VectorStore(
         client=chroma_client,
@@ -160,3 +166,76 @@ def parse_file_pattern(pattern: str) -> list[str]:
     alternatives = pattern[brace_start + 1 : brace_end].split(",")
 
     return [f"{prefix}{alt.strip()}{suffix}" for alt in alternatives]
+
+
+def create_semantic_search_service(
+    index_dir: Path,
+    collection_name: str = DEFAULT_COLLECTION_NAME,
+) -> SemanticSearchService:
+    """Create a production SemanticSearchService with persistent storage.
+
+    Uses the same SQLite and ChromaDB storage as the indexing service,
+    allowing search over previously indexed documents.
+
+    Args:
+        index_dir: Directory containing index files (meta.db, semantic/).
+        collection_name: ChromaDB collection name.
+
+    Returns:
+        Configured SemanticSearchService ready for use.
+    """
+    logger = structlog.get_logger(__name__)
+
+    db_path = index_dir / METADATA_DB_FILENAME
+    engine = create_async_engine_from_path(str(db_path))
+    metadata_store = MetadataStore(engine=engine, logger=logger)
+
+    chroma_path = index_dir / VECTOR_STORE_DIRNAME
+    chroma_client = chromadb.PersistentClient(path=str(chroma_path))
+    vector_store = VectorStore(
+        client=chroma_client,
+        collection_name=collection_name,
+        logger=logger,
+    )
+
+    return SemanticSearchService(
+        vector_store=vector_store,
+        metadata_store=metadata_store,
+        logger=logger,
+    )
+
+
+def create_test_semantic_search_service(
+    collection_name: str | None = None,
+) -> SemanticSearchService:
+    """Create a SemanticSearchService with in-memory storage for testing.
+
+    Uses in-memory SQLite and ephemeral ChromaDB for fast, isolated tests.
+    Each call creates independent storage, so tests don't interfere.
+
+    Args:
+        collection_name: ChromaDB collection name. If None, generates unique name.
+
+    Returns:
+        Configured SemanticSearchService with in-memory storage.
+    """
+    from uuid import uuid4
+
+    logger = structlog.get_logger(__name__)
+
+    engine = create_async_engine_from_path(":memory:")
+    metadata_store = MetadataStore(engine=engine, logger=logger)
+
+    chroma_client = chromadb.EphemeralClient()
+    effective_collection_name = collection_name or f"test_{uuid4().hex[:_TEST_COLLECTION_ID_LENGTH]}"
+    vector_store = VectorStore(
+        client=chroma_client,
+        collection_name=effective_collection_name,
+        logger=logger,
+    )
+
+    return SemanticSearchService(
+        vector_store=vector_store,
+        metadata_store=metadata_store,
+        logger=logger,
+    )

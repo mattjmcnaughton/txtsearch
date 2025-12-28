@@ -7,7 +7,7 @@ database operations. This avoids thread pool overhead from asyncio.to_thread().
 from datetime import timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import column, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlmodel import SQLModel
 
@@ -142,6 +142,46 @@ class MetadataStore:
             result = await session.execute(statement)
             records = result.scalars().all()
             return [self._record_to_chunk(r) for r in records]
+
+    async def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[DocumentChunk]:
+        """Retrieve chunks by their IDs.
+
+        Args:
+            chunk_ids: List of chunk IDs to fetch.
+
+        Returns:
+            List of DocumentChunk models for the given IDs.
+            Results are returned in the order they appear in the database,
+            not the order of input IDs. Missing IDs are silently skipped.
+        """
+        if not chunk_ids:
+            return []
+
+        async with AsyncSession(self._engine) as session:
+            statement = select(ChunkRecord).where(column("chunk_id").in_(chunk_ids))
+            result = await session.execute(statement)
+            records = result.scalars().all()
+            return [self._record_to_chunk(r) for r in records]
+
+    async def get_documents_by_ids(self, document_ids: list[str]) -> list[Document]:
+        """Retrieve documents by their IDs.
+
+        Args:
+            document_ids: List of document IDs to fetch.
+
+        Returns:
+            List of Document models for the given IDs.
+            Results are returned in the order they appear in the database,
+            not the order of input IDs. Missing IDs are silently skipped.
+        """
+        if not document_ids:
+            return []
+
+        async with AsyncSession(self._engine) as session:
+            statement = select(DocumentRecord).where(column("document_id").in_(document_ids))
+            result = await session.execute(statement)
+            records = result.scalars().all()
+            return [self._record_to_document(r) for r in records]
 
     async def delete_document(self, document_id: str) -> bool:
         """Delete a document and its chunks.
