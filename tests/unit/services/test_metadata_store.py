@@ -171,6 +171,45 @@ class TestMetadataStoreChunkOperations:
         assert result == []
 
 
+class TestMetadataStoreGetChunksByIds:
+    """Tests for get_chunks_by_ids bulk retrieval."""
+
+    async def test_empty_input_returns_empty_list(self, store: MetadataStore) -> None:
+        result = await store.get_chunks_by_ids([])
+        assert result == []
+
+    async def test_returns_chunks_for_valid_ids(self, store: MetadataStore) -> None:
+        document = _make_document()
+        await store.save_document(document)
+
+        chunk1 = _make_chunk(document.document_id, chunk_index=0)
+        chunk2 = _make_chunk(document.document_id, chunk_index=1)
+        await store.save_chunks([chunk1, chunk2])
+
+        result = await store.get_chunks_by_ids([chunk1.chunk_id, chunk2.chunk_id])
+
+        assert len(result) == 2
+        returned_ids = {c.chunk_id for c in result}
+        assert returned_ids == {chunk1.chunk_id, chunk2.chunk_id}
+
+    async def test_silently_skips_missing_ids(self, store: MetadataStore) -> None:
+        result = await store.get_chunks_by_ids([str(uuid4()), str(uuid4())])
+        assert result == []
+
+    async def test_handles_mixed_valid_and_invalid_ids(self, store: MetadataStore) -> None:
+        document = _make_document()
+        await store.save_document(document)
+
+        chunk = _make_chunk(document.document_id)
+        await store.save_chunks([chunk])
+
+        nonexistent_id = str(uuid4())
+        result = await store.get_chunks_by_ids([chunk.chunk_id, nonexistent_id])
+
+        assert len(result) == 1
+        assert result[0].chunk_id == chunk.chunk_id
+
+
 class TestMetadataStoreDeleteOperations:
     """Tests for delete operations."""
 
