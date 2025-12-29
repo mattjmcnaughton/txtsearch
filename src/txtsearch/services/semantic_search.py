@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import structlog
 
+from txtsearch.models.chunk import DocumentChunk
+from txtsearch.models.document import Document
 from txtsearch.models.enums import SearchStrategy
 from txtsearch.models.hit import SearchHit
 from txtsearch.models.query import Query
@@ -136,11 +138,16 @@ class SemanticSearchService:
         """Convert vector query results to SearchHit objects."""
 
         chunk_ids = vector_result.ids
-        chunks_by_id = {}
+        chunks_by_id: dict[str, DocumentChunk] = {}
+        docs_by_id: dict[str, Document] = {}
 
         if chunk_ids:
             chunks = await self._metadata_store.get_chunks_by_ids(chunk_ids)
             chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+
+            unique_doc_ids = list({chunk.document_id for chunk in chunks})
+            documents = await self._metadata_store.get_documents_by_ids(unique_doc_ids)
+            docs_by_id = {doc.document_id: doc for doc in documents}
 
         hits: list[SearchHit] = []
         for i, chunk_id in enumerate(chunk_ids):
@@ -149,6 +156,9 @@ class SemanticSearchService:
 
             chunk = chunks_by_id.get(chunk_id)
             document_id = chunk.document_id if chunk else vector_result.metadatas[i].get("document_id", "")
+
+            document = docs_by_id.get(document_id)
+            uri = document.uri if document else None
 
             snippet = None
             if query.include_snippets:
@@ -166,6 +176,7 @@ class SemanticSearchService:
                 extra={
                     "distance": distance,
                     "chunk_index": chunk.chunk_index if chunk else None,
+                    "uri": uri,
                 },
             )
             hits.append(hit)

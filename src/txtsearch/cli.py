@@ -1,29 +1,33 @@
 """Text search and indexing CLI.
 
-Provides indexing and search commands for directories with semantic search,
-llm.txt style search, and grep-based search capabilities.
+Thin Typer wrapper that delegates to Command classes.
 """
 
 import asyncio
+import json
 import sys
-from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 import structlog
 import typer
 
-from txtsearch.services.factory import create_indexing_service, parse_file_pattern
-from txtsearch.services.index import IndexingResult
-
-
-class SearchStrategy(str, Enum):
-    """Available search strategies."""
-
-    LITERAL = "literal"
-    LEXICAL = "lexical"
-    SEMANTIC = "semantic"
-    AGENTIC = "agentic"
+from txtsearch.commands.index import IndexCommand, IndexInput, IndexOutput
+from txtsearch.commands.mcp import McpCommand, McpInput
+from txtsearch.commands.search import (
+    IndexNotFoundError,
+    SearchCommand,
+    SearchInput,
+    SearchOutput,
+    StrategyNotSupportedError,
+)
+from txtsearch.commands.serve import ServeCommand, ServeInput
+from txtsearch.models.enums import SearchStrategy
+from txtsearch.services.factory import (
+    create_indexing_service,
+    create_semantic_search_service,
+    parse_file_pattern,
+)
 
 
 structlog.configure(
@@ -60,6 +64,32 @@ Examples:
 )
 
 
+async def _run_index_command(
+    input: IndexInput,
+    output_dir: Path,
+    include_patterns: list[str] | None,
+    exclude_patterns: list[str] | None,
+) -> IndexOutput:
+    """Execute the index command with the given input."""
+    async with create_indexing_service(
+        output_dir=output_dir,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
+    ) as service:
+        command = IndexCommand(indexing_service=service)
+        return await command.run(input)
+
+
+async def _run_search_command(
+    input: SearchInput,
+    index_dir: Path,
+) -> SearchOutput:
+    """Execute the search command with the given input."""
+    async with create_semantic_search_service(index_dir=index_dir) as service:
+        command = SearchCommand(search_service=service)
+        return await command.run(input)
+
+
 @app.command()
 def index(
     directory: str = typer.Argument(
@@ -87,26 +117,25 @@ def index(
 ) -> None:
     """Index a directory for search capabilities."""
     target_dir = Path(directory)
-
-    if not target_dir.exists():
-        logger.error("directory_not_found", directory=str(target_dir))
-        raise typer.Exit(1)
-
     index_dir = Path(output_dir) if output_dir else target_dir / ".txtsearch"
 
     include_patterns = parse_file_pattern(file_pattern) if file_pattern else None
     exclude_patterns = parse_file_pattern(exclude) if exclude else None
 
-    async def run_indexing() -> IndexingResult:
-        async with create_indexing_service(
-            output_dir=index_dir,
-            include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns,
-        ) as service:
-            return await service.index_directory(target_dir)
+    input_dto = IndexInput(
+        directory=target_dir,
+        output_dir=index_dir,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
+    )
 
-    result = asyncio.run(run_indexing())
+    try:
+        output = asyncio.run(_run_index_command(input_dto, index_dir, include_patterns, exclude_patterns))
+    except FileNotFoundError:
+        logger.error("directory_not_found", directory=str(target_dir))
+        raise typer.Exit(1)
 
+    result = output.result
     if result.errors:
         for error in result.errors:
             logger.warning("indexing_error", error=error)
@@ -134,7 +163,7 @@ def search(
         SearchStrategy.SEMANTIC,
         "--strategy",
         "-s",
-        help="Search strategy to use",
+        help="Search strategy to use (semantic, literal, lexical, agentic)",
     ),
     limit: int = typer.Option(
         10,
@@ -148,6 +177,12 @@ def search(
         "-C",
         help="Show N lines of context around matches",
     ),
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output results as JSON",
+    ),
 ) -> None:
     """Search indexed directory using various search methods."""
     search_dir = Path(directory) if directory else Path.cwd()
@@ -155,20 +190,72 @@ def search(
 
     if not index_dir.exists():
         logger.error("index_not_found", index_dir=str(index_dir))
-        typer.echo("No index found. Run 'txtsearch index' first.")
+        typer.echo("No index found. Run 'txtsearch index' first.", err=True)
         raise typer.Exit(1)
 
-    logger.info(
-        "starting_search",
+    input_dto = SearchInput(
         query=query,
-        strategy=strategy.value,
-        directory=str(search_dir),
+        directory=search_dir,
+        strategy=strategy,
         limit=limit,
+        include_snippets=True,
     )
 
-    # TODO: Implement search functionality
-    typer.echo(f"Searching for '{query}' using {strategy.value} strategy")
-    typer.echo("Search functionality will be implemented here.")
+    try:
+        output = asyncio.run(_run_search_command(input_dto, index_dir))
+    except IndexNotFoundError:
+        # This shouldn't happen since we check above, but handle it gracefully
+        logger.error("index_not_found", index_dir=str(index_dir))
+        typer.echo("No index found. Run 'txtsearch index' first.", err=True)
+        raise typer.Exit(1)
+    except StrategyNotSupportedError as e:
+        logger.error("strategy_not_implemented", strategy=strategy)
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    except ValueError as e:
+        logger.error("invalid_query", error=str(e))
+        typer.echo(f"Invalid query: {e}", err=True)
+        raise typer.Exit(1)
+
+    if output_json:
+        _output_json_results(output)
+    else:
+        _output_human_results(output)
+
+
+def _output_json_results(output: SearchOutput) -> None:
+    """Output search results as JSON."""
+    data = {
+        "query": output.query,
+        "strategy": output.strategy.value,
+        "result_count": output.result_count,
+        "results": [hit.model_dump(mode="json") for hit in output.hits],
+    }
+    typer.echo(json.dumps(data, indent=2))
+
+
+def _output_human_results(output: SearchOutput) -> None:
+    """Output search results in human-readable format."""
+    if not output.hits:
+        typer.echo(f"No results found for '{output.query}'")
+        return
+
+    typer.echo(f"Found {output.result_count} result(s) for '{output.query}' using {output.strategy.value} strategy:\n")
+
+    for hit in output.hits:
+        score_str = f"{hit.score:.1%}" if hit.score is not None else "N/A"
+        typer.echo(f"[{hit.rank + 1}] Score: {score_str}")
+
+        doc_uri = hit.extra.get("uri", hit.document_id)
+        typer.echo(f"    File: {doc_uri}")
+
+        if hit.snippet:
+            snippet_preview = hit.snippet[:200].replace("\n", " ")
+            if len(hit.snippet) > 200:
+                snippet_preview += "..."
+            typer.echo(f"    Snippet: {snippet_preview}")
+
+        typer.echo("")
 
 
 @app.command()
@@ -194,18 +281,28 @@ def serve(
 ) -> None:
     """Start REST API server for search functionality."""
     search_dir = Path(directory) if directory else Path.cwd()
-    index_dir = search_dir / ".txtsearch"
 
-    if not index_dir.exists():
-        logger.error("index_not_found", index_dir=str(index_dir))
+    input_dto = ServeInput(
+        directory=search_dir,
+        host=host,
+        port=port,
+    )
+
+    async def run() -> None:
+        command = ServeCommand()
+        output = await command.run(input_dto)
+        typer.echo(f"Starting API server on {host}:{port}")
+        typer.echo(output.message)
+
+    try:
+        asyncio.run(run())
+    except NotImplementedError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    except IndexNotFoundError:
+        logger.error("index_not_found", index_dir=str(search_dir / ".txtsearch"))
         typer.echo("No index found. Run 'txtsearch index' first.")
         raise typer.Exit(1)
-
-    logger.info("starting_api_server", host=host, port=port, directory=str(search_dir))
-
-    # TODO: Implement FastAPI server
-    typer.echo(f"Starting API server on {host}:{port}")
-    typer.echo("REST API functionality will be implemented here.")
 
 
 @app.command()
@@ -219,18 +316,24 @@ def mcp(
 ) -> None:
     """Start MCP server for search functionality."""
     search_dir = Path(directory) if directory else Path.cwd()
-    index_dir = search_dir / ".txtsearch"
 
-    if not index_dir.exists():
-        logger.error("index_not_found", index_dir=str(index_dir))
+    input_dto = McpInput(directory=search_dir)
+
+    async def run() -> None:
+        command = McpCommand()
+        output = await command.run(input_dto)
+        typer.echo("Starting MCP server")
+        typer.echo(output.message)
+
+    try:
+        asyncio.run(run())
+    except NotImplementedError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    except IndexNotFoundError:
+        logger.error("index_not_found", index_dir=str(search_dir / ".txtsearch"))
         typer.echo("No index found. Run 'txtsearch index' first.")
         raise typer.Exit(1)
-
-    logger.info("starting_mcp_server", directory=str(search_dir))
-
-    # TODO: Implement MCP server
-    typer.echo("Starting MCP server")
-    typer.echo("MCP functionality will be implemented here.")
 
 
 @app.command()
