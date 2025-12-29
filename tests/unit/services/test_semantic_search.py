@@ -441,6 +441,41 @@ class TestSemanticSearchServiceScoreNormalization:
 
         assert hits[0].extra["distance"] == 0.25
 
+    async def test_includes_uri_in_extra(
+        self,
+        search_service: SemanticSearchService,
+        fake_vector_store: FakeVectorStore,
+        fake_metadata_store: FakeMetadataStore,
+    ) -> None:
+        doc_id = str(uuid4())
+        chunk_id = str(uuid4())
+        test_uri = f"file:///test/{doc_id}.txt"
+
+        fake_metadata_store.documents[doc_id] = Document(
+            document_id=doc_id,
+            uri=test_uri,
+            display_name="test.txt",
+            content_hash="a" * 64,
+            size_bytes=100,
+            source_type=SourceType.FILE,
+            ingested_at=datetime.now(timezone.utc),
+        )
+        fake_metadata_store.chunks[chunk_id] = make_chunk(chunk_id=chunk_id, document_id=doc_id)
+
+        fake_vector_store.query_results = [
+            make_query_result(
+                ids=[chunk_id],
+                documents=["text"],
+                distances=[0.1],
+                metadatas=[{"document_id": doc_id}],
+            )
+        ]
+
+        query = Query(text="test", strategy=SearchStrategy.SEMANTIC)
+        hits = await search_service.search(query)
+
+        assert hits[0].extra["uri"] == test_uri
+
 
 class TestSemanticSearchServiceFiltering:
     """Tests for query filtering."""
