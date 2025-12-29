@@ -5,6 +5,7 @@ llm.txt style search, and grep-based search capabilities.
 """
 
 import asyncio
+import json
 import sys
 from enum import Enum
 from pathlib import Path
@@ -13,7 +14,14 @@ from typing import Optional
 import structlog
 import typer
 
-from txtsearch.services.factory import create_indexing_service, parse_file_pattern
+from txtsearch.models.enums import SearchStrategy as ModelSearchStrategy
+from txtsearch.models.hit import SearchHit
+from txtsearch.models.query import Query
+from txtsearch.services.factory import (
+    create_indexing_service,
+    create_semantic_search_service,
+    parse_file_pattern,
+)
 from txtsearch.services.index import IndexingResult
 
 
@@ -148,6 +156,12 @@ def search(
         "-C",
         help="Show N lines of context around matches",
     ),
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output results as JSON",
+    ),
 ) -> None:
     """Search indexed directory using various search methods."""
     search_dir = Path(directory) if directory else Path.cwd()
@@ -155,7 +169,15 @@ def search(
 
     if not index_dir.exists():
         logger.error("index_not_found", index_dir=str(index_dir))
-        typer.echo("No index found. Run 'txtsearch index' first.")
+        typer.echo("No index found. Run 'txtsearch index' first.", err=True)
+        raise typer.Exit(1)
+
+    if strategy != SearchStrategy.SEMANTIC:
+        logger.error("strategy_not_implemented", strategy=strategy.value)
+        typer.echo(
+            f"Strategy '{strategy.value}' is not yet implemented. Use --strategy semantic.",
+            err=True,
+        )
         raise typer.Exit(1)
 
     logger.info(
@@ -166,9 +188,77 @@ def search(
         limit=limit,
     )
 
-    # TODO: Implement search functionality
-    typer.echo(f"Searching for '{query}' using {strategy.value} strategy")
-    typer.echo("Search functionality will be implemented here.")
+    model_strategy = ModelSearchStrategy(strategy.value)
+
+    try:
+        query_obj = Query(
+            text=query,
+            strategy=model_strategy,
+            top_k=limit,
+            include_snippets=True,
+        )
+    except ValueError as e:
+        logger.error("invalid_query", error=str(e))
+        typer.echo(f"Invalid query: {e}", err=True)
+        raise typer.Exit(1)
+
+    async def run_search() -> list[SearchHit]:
+        async with create_semantic_search_service(index_dir=index_dir) as service:
+            await service.initialize()
+            return await service.search(query_obj)
+
+    try:
+        hits = asyncio.run(run_search())
+    except Exception as e:
+        logger.error("search_failed", error=str(e))
+        typer.echo(f"Search failed: {e}", err=True)
+        raise typer.Exit(1)
+
+    logger.info("search_completed", result_count=len(hits))
+
+    if output_json:
+        _output_json_results(hits, query, strategy.value)
+    else:
+        _output_human_results(hits, query, strategy.value)
+
+
+def _output_json_results(
+    hits: list[SearchHit], query: str, strategy: str
+) -> None:
+    """Output search results as JSON."""
+    output = {
+        "query": query,
+        "strategy": strategy,
+        "result_count": len(hits),
+        "results": [hit.model_dump(mode="json") for hit in hits],
+    }
+    typer.echo(json.dumps(output, indent=2))
+
+
+def _output_human_results(
+    hits: list[SearchHit], query: str, strategy: str
+) -> None:
+    """Output search results in human-readable format."""
+    if not hits:
+        typer.echo(f"No results found for '{query}'")
+        return
+
+    typer.echo(f"Found {len(hits)} result(s) for '{query}' using {strategy} strategy:\n")
+
+    for hit in hits:
+        score_str = f"{hit.score:.1%}" if hit.score is not None else "N/A"
+        typer.echo(f"[{hit.rank + 1}] Score: {score_str}")
+
+        doc_uri = hit.extra.get("uri", hit.document_id)
+        typer.echo(f"    File: {doc_uri}")
+
+        if hit.snippet:
+            snippet_preview = hit.snippet[:200].replace("\n", " ")
+            if len(hit.snippet) > 200:
+                snippet_preview += "..."
+            typer.echo(f"    Snippet: {snippet_preview}")
+
+        typer.echo("")
 
 
 @app.command()
