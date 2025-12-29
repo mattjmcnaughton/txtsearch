@@ -59,6 +59,9 @@ This document guides AI agents and contributors.
 - Follow the pyramid: unit > integration > e2e.
 - Unit tests (`tests/unit/...`) use DI with in-memory or fake dependencies and run quickly—never mark them `slow` or `external`.
 - Integration tests (`tests/integration/...`) exercise component interactions or real external systems; mark with `@pytest.mark.slow` and/or `@pytest.mark.external` as needed.
-- End-to-end tests (`tests/e2e/...`) cover core workflows spanning commands/services/adapters.
+- End-to-end tests (`tests/e2e/...`) cover core workflows spanning commands/services/adapters:
+  - Focus on happy path only—verify the main workflow works end-to-end.
+  - Skip trivial commands (e.g., `version`) and error cases that unit tests already cover.
+  - Mark with `@pytest.mark.slow` and `@pytest.mark.external` since they use real storage/embeddings.
 - Reuse fixtures that spin up in-memory databases, fake LiteLLM clients, or temp directories to keep tests deterministic.
 - Use class-based test organization; group related tests into classes (e.g., `TestFileWalkerPatternMatching`, `TestFileWalkerErrorHandling`).
