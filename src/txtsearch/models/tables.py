@@ -74,3 +74,28 @@ class ChunkRecord(SQLModel, table=True):
     line_end: int
     token_count: int | None = None
     extra: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+
+
+class DocumentChunkLexical(SQLModel, table=True):
+    """DuckDB table for lexical full-text search.
+
+    This table is optimized for DuckDB's FTS extension and stores denormalized
+    chunk data for fast BM25-ranked keyword search. Unlike ChunkRecord which is
+    used in SQLite with the metadata store, this table is specifically designed
+    for DuckDB's full-text search capabilities.
+
+    The document_id serves as the primary key for FTS indexing. Additional
+    metadata (file_path, source_type) is denormalized here to support filtering
+    without joins during search operations.
+    """
+
+    __tablename__ = "document_chunks"
+
+    document_id: str = Field(primary_key=True)
+    chunk_id: str = Field(index=True)
+    chunk_index: int = Field(ge=0)
+    content: str
+    file_path: str
+    source_type: str
+    ingested_at: datetime
+    extra: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)

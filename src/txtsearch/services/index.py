@@ -18,6 +18,7 @@ from txtsearch.models.document import Document
 from txtsearch.models.enums import SourceType
 from txtsearch.services.chunker import Chunker
 from txtsearch.services.file_walker import FileWalker
+from txtsearch.services.lexical_store import LexicalStore
 from txtsearch.services.metadata_store import MetadataStore
 from txtsearch.services.vector_store import VectorStore
 
@@ -56,17 +57,21 @@ class IndexingService:
         metadata_store: MetadataStore,
         vector_store: VectorStore,
         chunker: Chunker,
+        lexical_store: LexicalStore | None = None,
         logger: structlog.stdlib.BoundLogger | None = None,
     ) -> None:
         self._file_walker = file_walker
         self._metadata_store = metadata_store
         self._vector_store = vector_store
         self._chunker = chunker
+        self._lexical_store = lexical_store
         self._logger = logger or structlog.get_logger(__name__)
 
     async def close(self) -> None:
         """Close all resources and release connections."""
         await self._metadata_store.close()
+        if self._lexical_store:
+            await self._lexical_store.close()
 
     async def __aenter__(self) -> "IndexingService":
         """Enter async context."""
@@ -104,6 +109,8 @@ class IndexingService:
 
         await self._metadata_store.initialize_schema()
         await self._vector_store.initialize()
+        if self._lexical_store:
+            await self._lexical_store.initialize()
 
         files_processed = 0
         files_skipped = 0
@@ -210,7 +217,7 @@ class IndexingService:
         )
 
     async def _persist_document(self, document: Document, chunks: list[DocumentChunk]) -> None:
-        """Persist document and chunks to both metadata and vector stores."""
+        """Persist document and chunks to metadata, vector, and lexical stores."""
         await self._metadata_store.save_document(document)
         await self._metadata_store.save_chunks(chunks)
 
@@ -231,3 +238,19 @@ class IndexingService:
             documents=chunk_texts,
             metadatas=chunk_metadatas,
         )
+
+        if self._lexical_store:
+            lexical_chunks = [
+                {
+                    "document_id": chunk.chunk_id,
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_index": chunk.chunk_index,
+                    "content": chunk.text,
+                    "file_path": document.uri,
+                    "source_type": str(document.source_type),
+                    "ingested_at": document.ingested_at,
+                    "extra": {},
+                }
+                for chunk in chunks
+            ]
+            await self._lexical_store.index_chunks(lexical_chunks)
