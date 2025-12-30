@@ -8,7 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from txtsearch.models.enums import SearchStrategy
 from txtsearch.models.hit import SearchHit
 from txtsearch.models.query import Query
-from txtsearch.services.factory import create_lexical_search_service, create_semantic_search_service
+from txtsearch.services.factory import (
+    LEXICAL_DB_FILENAME,
+    create_lexical_search_service,
+    create_semantic_search_service,
+)
 
 
 class SearchInput(BaseModel):
@@ -86,7 +90,7 @@ class SearchCommand:
         if input.strategy == SearchStrategy.SEMANTIC:
             search_service = create_semantic_search_service(index_dir=input.directory)
         elif input.strategy == SearchStrategy.LEXICAL:
-            lexical_db = input.directory / "lexical.duckdb"
+            lexical_db = input.directory / LEXICAL_DB_FILENAME
             if not lexical_db.exists():
                 raise IndexNotFoundError(
                     f"Lexical index not found at {lexical_db}. "

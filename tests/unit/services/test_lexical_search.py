@@ -328,6 +328,62 @@ class TestLexicalSearchHydration:
 
         await service.close()
 
+    async def test_search_normalizes_identical_scores(self):
+        """Test that identical BM25 scores all get normalized to 1.0."""
+        lexical_store = FakeLexicalStore()
+        metadata_store = FakeMetadataStore()
+        service = LexicalSearchService(lexical_store, metadata_store)
+
+        doc_id = str(uuid4())
+        metadata_store.documents[doc_id] = make_document(document_id=doc_id)
+
+        lexical_store.search_results = [
+            {
+                "document_id": doc_id,
+                "chunk_id": str(uuid4()),
+                "chunk_index": 0,
+                "content": "Content 1",
+                "file_path": "file:///1.txt",
+                "source_type": "file",
+                "ingested_at": datetime.now(timezone.utc),
+                "extra": {},
+                "score": 5.0,
+            },
+            {
+                "document_id": doc_id,
+                "chunk_id": str(uuid4()),
+                "chunk_index": 1,
+                "content": "Content 2",
+                "file_path": "file:///2.txt",
+                "source_type": "file",
+                "ingested_at": datetime.now(timezone.utc),
+                "extra": {},
+                "score": 5.0,
+            },
+            {
+                "document_id": doc_id,
+                "chunk_id": str(uuid4()),
+                "chunk_index": 2,
+                "content": "Content 3",
+                "file_path": "file:///3.txt",
+                "source_type": "file",
+                "ingested_at": datetime.now(timezone.utc),
+                "extra": {},
+                "score": 5.0,
+            },
+        ]
+
+        await service.initialize()
+
+        query = Query(text="test", strategy=SearchStrategy.LEXICAL)
+        hits = await service.search(query)
+
+        assert len(hits) == 3
+        for hit in hits:
+            assert hit.score == 1.0
+
+        await service.close()
+
 
 class TestLexicalSearchFiltering:
     """Test filtering and re-ranking."""

@@ -197,8 +197,8 @@ class LexicalStore:
         LIMIT ?
         """
 
-        result = await asyncio.to_thread(self._conn.execute, search_sql, params)
-        rows = await asyncio.to_thread(result.fetchall)
+        result_obj = await asyncio.to_thread(self._conn.execute, search_sql, params)
+        rows = await asyncio.to_thread(result_obj.fetchall)
 
         columns = [
             "document_id",

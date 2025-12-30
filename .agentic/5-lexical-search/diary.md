@@ -93,10 +93,56 @@ Refactored `src/txtsearch/commands/search.py`:
 The CLI in `src/txtsearch/cli.py` already supports `--strategy` parameter via the SearchInput model.
 No additional changes needed - users can already pass `--strategy lexical`.
 
-### Next: Testing Implementation
+### Testing Implementation
 
-Now moving to comprehensive testing (Steps 8-11). Will create:
-- Unit tests for LexicalStore (in-memory DuckDB)
-- Unit tests for LexicalSearchService (mocks/fakes)
-- Integration tests (real FTS behavior)
-- E2E tests (full CLI workflow)
+#### Step 8: Unit Tests for LexicalStore
+**Status**: Completed
+
+Created `tests/unit/services/test_lexical_store.py` with comprehensive coverage:
+- TestLexicalStoreInitialization: schema creation, FTS extension loading, context manager
+- TestLexicalStoreIndexing: bulk inserts, duplicate handling, empty lists
+- TestLexicalStoreSearch: BM25 ranking, filtering, top_k limits, result structure
+- All tests use in-memory DuckDB (`:memory:`) for speed
+- No external dependencies (not marked as slow/external)
+
+#### Step 9: Unit Tests for LexicalSearchService
+**Status**: Completed
+
+Created `tests/unit/services/test_lexical_search.py`:
+- TestLexicalSearchBasic: initialization, empty queries, parameter passing
+- TestLexicalSearchHydration: score normalization, SearchHit creation, snippet handling
+- TestLexicalSearchFiltering: source_types, ingested_after, re-ranking
+- Uses fake dependencies (FakeLexicalStore, FakeMetadataStore)
+- Validates 0-1 score range, LEXICAL strategy, extra fields
+
+#### Step 10: Integration Tests
+**Status**: Completed
+
+Created `tests/integration/services/test_lexical_search_integration.py`:
+- End-to-end workflow with real DuckDB FTS
+- BM25 ranking verification (term frequency)
+- Porter stemming behavior (word variants)
+- Marked with `@pytest.mark.slow`
+
+#### Step 11: E2E Tests
+**Status**: Completed
+
+Created `tests/e2e/commands/test_lexical_search_command.py`:
+- Full workflow: index files -> search with lexical strategy
+- Verify lexical.duckdb creation
+- Verify SearchHit structure and scores
+- Test error handling for missing index
+- Marked with `@pytest.mark.slow` and `@pytest.mark.external`
+
+#### Step 12: Error Handling
+**Status**: Completed (integrated into SearchCommand)
+
+Error handling implemented in SearchCommand:
+- IndexNotFoundError when lexical.duckdb missing
+- Helpful error messages guiding users to run indexing
+- StrategyNotSupportedError for unsupported strategies
+- ValueError for empty queries in LexicalSearchService
+
+### Next: Self-Review
+
+Moving to code review phase - will create review.md with findings and review-response.md with fixes.

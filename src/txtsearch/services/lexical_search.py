@@ -137,7 +137,6 @@ class LexicalSearchService:
         scores = [r["score"] for r in results]
         min_score = min(scores)
         max_score = max(scores)
-        score_range = max_score - min_score if max_score > min_score else 1.0
 
         unique_doc_ids = list({r["document_id"] for r in results})
         documents = await self._metadata_store.get_documents_by_ids(unique_doc_ids)
@@ -146,7 +145,10 @@ class LexicalSearchService:
         hits: list[SearchHit] = []
         for i, result in enumerate(results):
             raw_score = result["score"]
-            normalized_score = (raw_score - min_score) / score_range
+            if max_score == min_score:
+                normalized_score = 1.0
+            else:
+                normalized_score = (raw_score - min_score) / (max_score - min_score)
 
             document = docs_by_id.get(result["document_id"])
             uri = document.uri if document else None
