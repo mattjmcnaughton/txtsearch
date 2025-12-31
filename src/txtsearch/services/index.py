@@ -18,6 +18,7 @@ from txtsearch.models.document import Document
 from txtsearch.models.enums import SourceType
 from txtsearch.services.chunker import Chunker
 from txtsearch.services.file_walker import FileWalker
+from txtsearch.services.lexical_store import LexicalStore
 from txtsearch.services.metadata_store import MetadataStore
 from txtsearch.services.vector_store import VectorStore
 
@@ -56,17 +57,20 @@ class IndexingService:
         metadata_store: MetadataStore,
         vector_store: VectorStore,
         chunker: Chunker,
+        lexical_store: LexicalStore,
         logger: structlog.stdlib.BoundLogger | None = None,
     ) -> None:
         self._file_walker = file_walker
         self._metadata_store = metadata_store
         self._vector_store = vector_store
         self._chunker = chunker
+        self._lexical_store = lexical_store
         self._logger = logger or structlog.get_logger(__name__)
 
     async def close(self) -> None:
         """Close all resources and release connections."""
         await self._metadata_store.close()
+        await self._lexical_store.close()
 
     async def __aenter__(self) -> "IndexingService":
         """Enter async context."""
@@ -85,7 +89,7 @@ class IndexingService:
         """Index all matching files in a directory.
 
         Discovers files, reads content, chunks text, generates embeddings,
-        and persists both metadata and vectors.
+        and persists both metadata, vectors, and the DuckDB FTS index.
 
         Args:
             directory: Root directory to index.
@@ -104,11 +108,13 @@ class IndexingService:
 
         await self._metadata_store.initialize_schema()
         await self._vector_store.initialize()
+        await self._lexical_store.initialize()
 
         files_processed = 0
         files_skipped = 0
         chunks_created = 0
         errors: list[str] = []
+        all_chunks: list[DocumentChunk] = []
 
         async for file_path in self._file_walker.walk(directory):
             result = await self._process_file(file_path, directory)
@@ -116,9 +122,14 @@ class IndexingService:
                 files_skipped += 1
             elif isinstance(result, FileError):
                 errors.append(f"{result.path}: {result.error}")
-            else:
+            elif isinstance(result, list):
                 files_processed += 1
-                chunks_created += result
+                chunks_created += len(result)
+                all_chunks.extend(result)
+
+        # Build lexical index after all documents are processed
+        if all_chunks:
+            await self._populate_lexical_index(all_chunks)
 
         self._logger.info(
             "indexing_completed",
@@ -136,7 +147,7 @@ class IndexingService:
             errors=errors,
         )
 
-    async def _process_file(self, file_path: Path, root_directory: Path) -> int | FileError | None:
+    async def _process_file(self, file_path: Path, root_directory: Path) -> list[DocumentChunk] | FileError | None:
         """Process a single file through the indexing pipeline.
 
         Args:
@@ -144,7 +155,7 @@ class IndexingService:
             root_directory: Root directory for relative path computation.
 
         Returns:
-            Number of chunks created, FileError on failure, or None if skipped.
+            List of created chunks, FileError on failure, or None if skipped.
         """
         self._logger.debug(
             "file_processing_started",
@@ -187,7 +198,7 @@ class IndexingService:
             chunk_count=len(chunks),
         )
 
-        return len(chunks)
+        return chunks
 
     async def _read_file(self, file_path: Path) -> str:
         """Read file content asynchronously."""
@@ -230,4 +241,24 @@ class IndexingService:
             ids=chunk_ids,
             documents=chunk_texts,
             metadatas=chunk_metadatas,
+        )
+
+    async def _populate_lexical_index(self, chunks: list[DocumentChunk]) -> None:
+        """Populate the DuckDB FTS index with all chunks.
+
+        DuckDB FTS indexes must be rebuilt after table changes, so we
+        populate all chunks at once after document ingestion completes.
+
+        Args:
+            chunks: All chunks to add to the lexical index.
+        """
+        chunk_ids = [chunk.chunk_id for chunk in chunks]
+        chunk_texts = [chunk.text for chunk in chunks]
+
+        await self._lexical_store.add_chunks(chunk_ids, chunk_texts)
+        await self._lexical_store.build_index()
+
+        self._logger.info(
+            "lexical_index_populated",
+            chunk_count=len(chunks),
         )

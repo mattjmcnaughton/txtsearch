@@ -25,9 +25,11 @@ from txtsearch.commands.serve import ServeCommand, ServeInput
 from txtsearch.models.enums import SearchStrategy
 from txtsearch.services.factory import (
     create_indexing_service,
+    create_lexical_search_service,
     create_semantic_search_service,
     parse_file_pattern,
 )
+from txtsearch.services.lexical_search import LexicalIndexNotFoundError
 
 
 structlog.configure(
@@ -85,9 +87,14 @@ async def _run_search_command(
     index_dir: Path,
 ) -> SearchOutput:
     """Execute the search command with the given input."""
-    async with create_semantic_search_service(index_dir=index_dir) as service:
-        command = SearchCommand(search_service=service)
-        return await command.run(input)
+    if input.strategy == SearchStrategy.LEXICAL:
+        async with create_lexical_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            return await command.run(input)
+    else:
+        async with create_semantic_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            return await command.run(input)
 
 
 @app.command()
@@ -207,6 +214,10 @@ def search(
         # This shouldn't happen since we check above, but handle it gracefully
         logger.error("index_not_found", index_dir=str(index_dir))
         typer.echo("No index found. Run 'txtsearch index' first.", err=True)
+        raise typer.Exit(1)
+    except LexicalIndexNotFoundError as e:
+        logger.error("lexical_index_not_found", index_dir=str(index_dir))
+        typer.echo(str(e), err=True)
         raise typer.Exit(1)
     except StrategyNotSupportedError as e:
         logger.error("strategy_not_implemented", strategy=strategy)

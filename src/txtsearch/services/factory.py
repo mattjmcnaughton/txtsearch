@@ -12,6 +12,8 @@ import structlog
 from txtsearch.services.chunker import Chunker
 from txtsearch.services.file_walker import FileWalker
 from txtsearch.services.index import IndexingService
+from txtsearch.services.lexical_search import LexicalSearchService
+from txtsearch.services.lexical_store import LexicalStore
 from txtsearch.services.metadata_store import MetadataStore, create_async_engine_from_path
 from txtsearch.services.semantic_search import SemanticSearchService
 from txtsearch.services.vector_store import VectorStore
@@ -21,6 +23,7 @@ _TEST_COLLECTION_ID_LENGTH = 8
 # Storage path constants
 METADATA_DB_FILENAME = "meta.db"
 VECTOR_STORE_DIRNAME = "semantic"
+LEXICAL_DB_FILENAME = "lexical.db"
 DEFAULT_COLLECTION_NAME = "chunks"
 
 
@@ -34,11 +37,11 @@ def create_indexing_service(
 ) -> IndexingService:
     """Create a production IndexingService with persistent storage.
 
-    Sets up SQLite for metadata and ChromaDB for vector storage, both
-    persisted to the specified output directory.
+    Sets up SQLite for metadata, ChromaDB for vector storage, and DuckDB
+    for lexical FTS, all persisted to the specified output directory.
 
     Args:
-        output_dir: Directory for storing index files (meta.db, semantic/).
+        output_dir: Directory for storing index files (meta.db, semantic/, lexical.db).
         include_patterns: File patterns to include (e.g., ["*.py", "*.md"]).
         exclude_patterns: File patterns to exclude.
         chunk_size: Target chunk size in characters.
@@ -64,6 +67,9 @@ def create_indexing_service(
         logger=logger,
     )
 
+    lexical_db_path = output_dir / LEXICAL_DB_FILENAME
+    lexical_store = LexicalStore(db_path=lexical_db_path, logger=logger)
+
     file_walker = FileWalker(
         include_patterns=include_patterns,
         exclude_patterns=exclude_patterns,
@@ -81,6 +87,7 @@ def create_indexing_service(
         metadata_store=metadata_store,
         vector_store=vector_store,
         chunker=chunker,
+        lexical_store=lexical_store,
         logger=logger,
     )
 
@@ -94,8 +101,9 @@ def create_test_indexing_service(
 ) -> IndexingService:
     """Create an IndexingService with in-memory storage for testing.
 
-    Uses in-memory SQLite and ephemeral ChromaDB for fast, isolated tests.
-    Each call creates independent storage, so tests don't interfere.
+    Uses in-memory SQLite, ephemeral ChromaDB, and in-memory DuckDB for
+    fast, isolated tests. Each call creates independent storage, so tests
+    don't interfere.
 
     Args:
         include_patterns: File patterns to include.
@@ -122,6 +130,8 @@ def create_test_indexing_service(
         logger=logger,
     )
 
+    lexical_store = LexicalStore(db_path=":memory:", logger=logger)
+
     file_walker = FileWalker(
         include_patterns=include_patterns,
         exclude_patterns=exclude_patterns,
@@ -139,6 +149,7 @@ def create_test_indexing_service(
         metadata_store=metadata_store,
         vector_store=vector_store,
         chunker=chunker,
+        lexical_store=lexical_store,
         logger=logger,
     )
 
@@ -236,6 +247,59 @@ def create_test_semantic_search_service(
 
     return SemanticSearchService(
         vector_store=vector_store,
+        metadata_store=metadata_store,
+        logger=logger,
+    )
+
+
+def create_lexical_search_service(
+    index_dir: Path,
+) -> LexicalSearchService:
+    """Create a production LexicalSearchService with persistent storage.
+
+    Uses the same SQLite metadata storage as other services and DuckDB for
+    full-text search, allowing lexical search over previously indexed documents.
+
+    Args:
+        index_dir: Directory containing index files (meta.db, lexical.db).
+
+    Returns:
+        Configured LexicalSearchService ready for use.
+    """
+    logger = structlog.get_logger(__name__)
+
+    db_path = index_dir / METADATA_DB_FILENAME
+    engine = create_async_engine_from_path(str(db_path))
+    metadata_store = MetadataStore(engine=engine, logger=logger)
+
+    lexical_db_path = index_dir / LEXICAL_DB_FILENAME
+    lexical_store = LexicalStore(db_path=lexical_db_path, logger=logger)
+
+    return LexicalSearchService(
+        lexical_store=lexical_store,
+        metadata_store=metadata_store,
+        logger=logger,
+    )
+
+
+def create_test_lexical_search_service() -> LexicalSearchService:
+    """Create a LexicalSearchService with in-memory storage for testing.
+
+    Uses in-memory SQLite and in-memory DuckDB for fast, isolated tests.
+    Each call creates independent storage, so tests don't interfere.
+
+    Returns:
+        Configured LexicalSearchService with in-memory storage.
+    """
+    logger = structlog.get_logger(__name__)
+
+    engine = create_async_engine_from_path(":memory:")
+    metadata_store = MetadataStore(engine=engine, logger=logger)
+
+    lexical_store = LexicalStore(db_path=":memory:", logger=logger)
+
+    return LexicalSearchService(
+        lexical_store=lexical_store,
         metadata_store=metadata_store,
         logger=logger,
     )

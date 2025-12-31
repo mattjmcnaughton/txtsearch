@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from txtsearch.models.enums import SearchStrategy
 from txtsearch.models.hit import SearchHit
 from txtsearch.models.query import Query
+from txtsearch.services.lexical_search import LexicalSearchService
 from txtsearch.services.semantic_search import SemanticSearchService
 
 
@@ -54,7 +55,7 @@ class SearchCommand:
 
     def __init__(
         self,
-        search_service: SemanticSearchService,
+        search_service: SemanticSearchService | LexicalSearchService,
         logger: structlog.stdlib.BoundLogger | None = None,
     ) -> None:
         self._search_service = search_service
@@ -72,9 +73,10 @@ class SearchCommand:
         Raises:
             StrategyNotSupportedError: If strategy is not implemented.
         """
-        if input.strategy != SearchStrategy.SEMANTIC:
+        supported_strategies = {SearchStrategy.SEMANTIC, SearchStrategy.LEXICAL}
+        if input.strategy not in supported_strategies:
             raise StrategyNotSupportedError(
-                f"Strategy '{input.strategy.value}' is not yet implemented. Use 'semantic' strategy."
+                f"Strategy '{input.strategy.value}' is not yet implemented. Use 'semantic' or 'lexical' strategy."
             )
 
         self._logger.info(

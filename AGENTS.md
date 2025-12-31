@@ -60,6 +60,12 @@ This document guides AI agents and contributors.
 - Convert between domain and table models using `.model_dump()` / `.model_validate()`.
 - SQLite does not preserve timezone info; restore UTC when reading datetime fields.
 
+## DuckDB & Full-Text Search
+- DuckDB is used for lexical (keyword) search via its FTS extension.
+- Wrap all DuckDB operations with `asyncio.to_thread()` since DuckDB is synchronous.
+- FTS indexes must be rebuilt after table changes; batch all inserts before calling `PRAGMA create_fts_index`.
+- To check if an FTS index exists, query the source table directly (e.g., `chunks_fts`), not the internal `fts_main_*` schema tables, as these are not visible in `duckdb_tables()`.
+
 ## Testing Strategy
 - Follow the pyramid: unit > integration > e2e.
 - Unit tests (`tests/unit/...`) use DI with in-memory or fake dependencies and run quickly—never mark them `slow` or `external`.
