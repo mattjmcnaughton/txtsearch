@@ -89,6 +89,28 @@ class FakeVectorStore:
                 self.metadatas[doc_id] = metadatas[i]
 
 
+class FakeLexicalStore:
+    """In-memory fake LexicalStore for testing."""
+
+    def __init__(self) -> None:
+        self.chunks: dict[str, str] = {}
+        self.initialized = False
+        self.index_built = False
+
+    async def initialize(self) -> None:
+        self.initialized = True
+
+    async def add_chunks(self, chunk_ids: list[str], texts: list[str]) -> None:
+        for chunk_id, text in zip(chunk_ids, texts, strict=True):
+            self.chunks[chunk_id] = text
+
+    async def build_index(self) -> None:
+        self.index_built = True
+
+    async def close(self) -> None:
+        pass
+
+
 @pytest.fixture
 def tmp_files(tmp_path: Path) -> dict[str, Path]:
     """Create temporary test files with known content."""
@@ -136,6 +158,12 @@ def fake_vector_store() -> FakeVectorStore:
 
 
 @pytest.fixture
+def fake_lexical_store() -> FakeLexicalStore:
+    """Create a fake lexical store."""
+    return FakeLexicalStore()
+
+
+@pytest.fixture
 def chunker() -> Chunker:
     """Create a real chunker with small chunk size for testing."""
     return Chunker(chunk_size=100, chunk_overlap=10)
@@ -146,6 +174,7 @@ def indexing_service(
     fake_file_walker: FakeFileWalker,
     fake_metadata_store: FakeMetadataStore,
     fake_vector_store: FakeVectorStore,
+    fake_lexical_store: FakeLexicalStore,
     chunker: Chunker,
 ) -> IndexingService:
     """Create an IndexingService with fake dependencies."""
@@ -154,6 +183,7 @@ def indexing_service(
         metadata_store=fake_metadata_store,
         vector_store=fake_vector_store,
         chunker=chunker,
+        lexical_store=fake_lexical_store,
     )
 
 
@@ -210,6 +240,7 @@ class TestIndexingServiceInitialization:
         fake_file_walker: FakeFileWalker,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
     ) -> None:
         service = IndexingService(
@@ -217,11 +248,13 @@ class TestIndexingServiceInitialization:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
         assert service._file_walker is fake_file_walker
         assert service._metadata_store is fake_metadata_store
         assert service._vector_store is fake_vector_store
         assert service._chunker is chunker
+        assert service._lexical_store is fake_lexical_store
 
 
 class TestIndexingServiceEmptyDirectory:
@@ -244,12 +277,14 @@ class TestIndexingServiceEmptyDirectory:
         indexing_service: IndexingService,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         tmp_path: Path,
     ) -> None:
         await indexing_service.index_directory(tmp_path)
 
         assert fake_metadata_store.initialized
         assert fake_vector_store.initialized
+        assert fake_lexical_store.initialized
 
 
 class TestIndexingServiceHappyPath:
@@ -259,6 +294,7 @@ class TestIndexingServiceHappyPath:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -269,6 +305,7 @@ class TestIndexingServiceHappyPath:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -282,6 +319,7 @@ class TestIndexingServiceHappyPath:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -292,6 +330,7 @@ class TestIndexingServiceHappyPath:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -303,6 +342,7 @@ class TestIndexingServiceHappyPath:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -313,6 +353,7 @@ class TestIndexingServiceHappyPath:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -324,6 +365,7 @@ class TestIndexingServiceHappyPath:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -334,6 +376,7 @@ class TestIndexingServiceHappyPath:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         await service.index_directory(tmp_path)
@@ -353,6 +396,7 @@ class TestIndexingServiceSkipsEmptyFiles:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -363,6 +407,7 @@ class TestIndexingServiceSkipsEmptyFiles:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -375,6 +420,7 @@ class TestIndexingServiceSkipsEmptyFiles:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -385,6 +431,7 @@ class TestIndexingServiceSkipsEmptyFiles:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -400,6 +447,7 @@ class TestIndexingServiceErrorHandling:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_path: Path,
     ) -> None:
@@ -411,6 +459,7 @@ class TestIndexingServiceErrorHandling:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -423,6 +472,7 @@ class TestIndexingServiceErrorHandling:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -439,6 +489,7 @@ class TestIndexingServiceErrorHandling:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -450,6 +501,7 @@ class TestIndexingServiceErrorHandling:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_path: Path,
     ) -> None:
@@ -461,6 +513,7 @@ class TestIndexingServiceErrorHandling:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -477,6 +530,8 @@ class TestIndexingServiceWithRealDependencies:
         tmp_files: dict[str, Path],
         tmp_path: Path,
     ) -> None:
+        from txtsearch.services.lexical_store import LexicalStore
+
         # Use real dependencies but with in-memory/ephemeral backends
         file_walker = FileWalker(include_patterns=["*.txt"])
         engine = create_async_engine_from_path(":memory:")
@@ -487,6 +542,7 @@ class TestIndexingServiceWithRealDependencies:
             collection_name=f"test_{uuid4().hex[:8]}",
             embedding_function=FakeEmbeddingFunction(),
         )
+        lexical_store = LexicalStore(db_path=":memory:")
         chunker = Chunker(chunk_size=100, chunk_overlap=10)
 
         service = IndexingService(
@@ -494,6 +550,7 @@ class TestIndexingServiceWithRealDependencies:
             metadata_store=metadata_store,
             vector_store=vector_store,
             chunker=chunker,
+            lexical_store=lexical_store,
         )
 
         result = await service.index_directory(tmp_path)
@@ -515,6 +572,7 @@ class TestIndexingServiceDocumentCreation:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -525,6 +583,7 @@ class TestIndexingServiceDocumentCreation:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         await service.index_directory(tmp_path)
@@ -543,6 +602,7 @@ class TestIndexingServiceDocumentCreation:
         self,
         fake_metadata_store: FakeMetadataStore,
         fake_vector_store: FakeVectorStore,
+        fake_lexical_store: FakeLexicalStore,
         chunker: Chunker,
         tmp_files: dict[str, Path],
         tmp_path: Path,
@@ -553,6 +613,7 @@ class TestIndexingServiceDocumentCreation:
             metadata_store=fake_metadata_store,
             vector_store=fake_vector_store,
             chunker=chunker,
+            lexical_store=fake_lexical_store,
         )
 
         await service.index_directory(tmp_path)
