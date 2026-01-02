@@ -55,7 +55,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/) f
 - `fix: handle empty directories correctly`
 - `feat!: change CLI command structure` (breaking change)
 - `docs: update installation instructions`
-- `test: add integration tests for MCP server`
+- `test: add integration tests for API server`
 
 ## Release Process
 

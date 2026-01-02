@@ -2,7 +2,7 @@
 
 Orchestrates ripgrep searches, hydrates results with metadata from SQLite,
 and returns normalized SearchHit objects for consumption by higher layers
-(CLI, API, MCP).
+(CLI, API).
 """
 
 from pathlib import Path

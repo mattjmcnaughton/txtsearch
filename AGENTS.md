@@ -9,7 +9,7 @@ This document guides AI agents and contributors.
 - Place command-line entrypoints under `commands/`.
 - Keep reusable domain models and Pydantic schemas in `models/`.
 - Implement core business logic in `services/`; expose narrow function/class APIs.
-- Host HTTP adapters under `api/` and MCP integrations under `mcp/`.
+- Host HTTP adapters under `api/`.
 - Mirror this structure inside `tests/` (e.g., `tests/unit/services/test_index.py` for `services/index.py`).
 
 ## Commands
@@ -18,12 +18,12 @@ This document guides AI agents and contributors.
 - Name DTOs `{Command}Input` and `{Command}Output` (e.g., `IndexInput`, `IndexOutput`).
 
 ## Dependency Injection
-- Instantiate services in a dedicated wiring module or factory, then inject them into commands, API handlers, and MCP tools.
+- Instantiate services in a dedicated wiring module or factory, then inject them into commands and API handlers.
 - Prefer constructor or explicit function parameter injection over globals to keep components swappable in tests.
 - Provide lightweight test doubles (fakes, stubs) living alongside unit tests.
 
 ## Pydantic Usage
-- Define all request/response contracts with Pydantic models; share them across CLI, REST, and MCP layers to guarantee shape parity.
+- Define all request/response contracts with Pydantic models; share them across CLI and REST layers to guarantee shape parity.
 - Keep domain entities (metadata records, search hits, strategy configs) as Pydantic models with rich type annotations.
 - Rely on `.model_dump()` / `.model_validate()` to enforce structured outputs and inputs.
 

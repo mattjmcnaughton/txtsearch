@@ -13,7 +13,6 @@ import structlog
 import typer
 
 from txtsearch.commands.index import IndexCommand, IndexInput, IndexOutput
-from txtsearch.commands.mcp import McpCommand, McpInput
 from txtsearch.commands.search import (
     IndexNotFoundError,
     SearchCommand,
@@ -60,10 +59,7 @@ Examples:
   uv run txtsearch search --strategy semantic "function that handles authentication"
 
   # Start REST API server
-  uv run txtsearch serve --port 8000
-
-  # Start MCP server
-  uv run txtsearch mcp""",
+  uv run txtsearch serve --port 8000""",
     rich_markup_mode="markdown",
 )
 
@@ -314,37 +310,6 @@ def serve(
         command = ServeCommand()
         output = await command.run(input_dto)
         typer.echo(f"Starting API server on {host}:{port}")
-        typer.echo(output.message)
-
-    try:
-        asyncio.run(run())
-    except NotImplementedError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(1)
-    except IndexNotFoundError:
-        logger.error("index_not_found", index_dir=str(search_dir / ".txtsearch"))
-        typer.echo("No index found. Run 'txtsearch index' first.")
-        raise typer.Exit(1)
-
-
-@app.command()
-def mcp(
-    directory: Optional[str] = typer.Option(
-        None,
-        "--directory",
-        "-d",
-        help="Directory with index to serve (default: current directory)",
-    ),
-) -> None:
-    """Start MCP server for search functionality."""
-    search_dir = Path(directory) if directory else Path.cwd()
-
-    input_dto = McpInput(directory=search_dir)
-
-    async def run() -> None:
-        command = McpCommand()
-        output = await command.run(input_dto)
-        typer.echo("Starting MCP server")
         typer.echo(output.message)
 
     try:
