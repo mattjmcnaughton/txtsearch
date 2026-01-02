@@ -19,6 +19,7 @@ from txtsearch.services.factory import (
     LEXICAL_DB_FILENAME,
     create_indexing_service,
     create_lexical_search_service,
+    create_literal_search_service,
     create_semantic_search_service,
 )
 from txtsearch.services.lexical_search import LexicalIndexNotFoundError
@@ -130,14 +131,14 @@ class TestSearchCommandErrors:
     """Error handling tests for SearchCommand."""
 
     async def test_raises_on_unsupported_strategy(self, indexed_codebase: Path) -> None:
-        """Raises StrategyNotSupportedError for non-semantic strategies."""
+        """Raises StrategyNotSupportedError for agentic strategy (not yet implemented)."""
         src_dir = indexed_codebase / "src"
         index_dir = src_dir / ".txtsearch"
 
         input_dto = SearchInput(
             query="test",
             directory=src_dir,
-            strategy=SearchStrategy.LITERAL,
+            strategy=SearchStrategy.AGENTIC,
         )
 
         async with create_semantic_search_service(index_dir=index_dir) as service:
@@ -288,3 +289,164 @@ class TestLexicalSearchMissingIndex:
             error_message = str(exc_info.value)
             assert "index" in error_message.lower()
             assert "txtsearch" in error_message.lower()
+
+
+def ripgrep_available() -> bool:
+    """Check if ripgrep is available on the system."""
+    import shutil
+
+    return shutil.which("rg") is not None
+
+
+@pytest.mark.slow
+@pytest.mark.external
+@pytest.mark.skipif(not ripgrep_available(), reason="ripgrep (rg) not installed")
+class TestLiteralSearchHappyPath:
+    """Test literal search via ripgrep (Acceptance Criteria #1, #2, #5)."""
+
+    async def test_literal_search_returns_matches(self, indexed_codebase: Path) -> None:
+        """Literal search returns matches for exact pattern."""
+        src_dir = indexed_codebase / "src"
+        index_dir = src_dir / ".txtsearch"
+
+        input_dto = SearchInput(
+            query="authenticate_user",
+            directory=src_dir,
+            strategy=SearchStrategy.LITERAL,
+            limit=10,
+        )
+
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            output = await command.run(input_dto, search_dir=src_dir)
+
+        assert output.query == "authenticate_user"
+        assert output.strategy == SearchStrategy.LITERAL
+        assert isinstance(output.hits, list)
+        assert output.result_count > 0, "Should find matches for 'authenticate_user'"
+
+    async def test_literal_search_returns_structured_hits(self, indexed_codebase: Path) -> None:
+        """Literal search results conform to SearchHit model."""
+        src_dir = indexed_codebase / "src"
+        index_dir = src_dir / ".txtsearch"
+
+        input_dto = SearchInput(
+            query="def",
+            directory=src_dir,
+            strategy=SearchStrategy.LITERAL,
+            limit=10,
+        )
+
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            output = await command.run(input_dto, search_dir=src_dir)
+
+        assert output.result_count > 0
+
+        for hit in output.hits:
+            # Verify required SearchHit fields
+            assert hit.hit_id is not None
+            assert hit.query_id is not None
+            assert hit.document_id is not None
+            assert hit.chunk_id is None  # Literal search is file-level
+            assert hit.rank >= 0
+            assert hit.score == 1.0  # Exact matches have perfect score
+            assert hit.strategy == SearchStrategy.LITERAL
+
+            # Verify extra contains literal-specific fields
+            assert "uri" in hit.extra
+            assert "line_number" in hit.extra
+            assert isinstance(hit.extra["line_number"], int)
+            assert hit.extra["line_number"] > 0
+
+    async def test_literal_search_includes_snippets(self, indexed_codebase: Path) -> None:
+        """Literal search includes matching line text in snippets."""
+        src_dir = indexed_codebase / "src"
+        index_dir = src_dir / ".txtsearch"
+
+        input_dto = SearchInput(
+            query="password",
+            directory=src_dir,
+            strategy=SearchStrategy.LITERAL,
+            limit=10,
+            include_snippets=True,
+        )
+
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            output = await command.run(input_dto, search_dir=src_dir)
+
+        assert output.result_count > 0
+
+        for hit in output.hits:
+            assert hit.snippet is not None, "Hit should include snippet"
+            assert "password" in hit.snippet.lower(), "Snippet should contain the search pattern"
+
+    async def test_literal_search_respects_limit(self, indexed_codebase: Path) -> None:
+        """Literal search respects the result limit."""
+        src_dir = indexed_codebase / "src"
+        index_dir = src_dir / ".txtsearch"
+
+        input_dto = SearchInput(
+            query="def",  # Common pattern, should have multiple matches
+            directory=src_dir,
+            strategy=SearchStrategy.LITERAL,
+            limit=2,
+        )
+
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            output = await command.run(input_dto, search_dir=src_dir)
+
+        assert output.result_count <= 2
+
+    async def test_literal_search_no_matches_returns_empty(self, indexed_codebase: Path) -> None:
+        """Literal search returns empty list when no matches found."""
+        src_dir = indexed_codebase / "src"
+        index_dir = src_dir / ".txtsearch"
+
+        input_dto = SearchInput(
+            query="xyznonexistentpatternxyz",
+            directory=src_dir,
+            strategy=SearchStrategy.LITERAL,
+            limit=10,
+        )
+
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            output = await command.run(input_dto, search_dir=src_dir)
+
+        assert output.result_count == 0
+        assert output.hits == []
+
+
+@pytest.mark.slow
+@pytest.mark.external
+@pytest.mark.skipif(not ripgrep_available(), reason="ripgrep (rg) not installed")
+class TestLiteralSearchDocumentLookup:
+    """Test literal search document metadata lookup."""
+
+    async def test_literal_search_uses_document_id_from_metadata(self, indexed_codebase: Path) -> None:
+        """Literal search uses document_id from metadata store when available."""
+        src_dir = indexed_codebase / "src"
+        index_dir = src_dir / ".txtsearch"
+
+        input_dto = SearchInput(
+            query="authenticate_user",
+            directory=src_dir,
+            strategy=SearchStrategy.LITERAL,
+            limit=10,
+        )
+
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            output = await command.run(input_dto, search_dir=src_dir)
+
+        assert output.result_count > 0
+
+        # The document should have been found in metadata store since we indexed
+        # This is verified by the document_id being a proper UUID from the index
+        for hit in output.hits:
+            assert hit.document_id is not None
+            # UUID format: 8-4-4-4-12 = 36 chars
+            assert len(hit.document_id) == 36

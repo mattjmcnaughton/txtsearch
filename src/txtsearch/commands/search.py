@@ -9,6 +9,7 @@ from txtsearch.models.enums import SearchStrategy
 from txtsearch.models.hit import SearchHit
 from txtsearch.models.query import Query
 from txtsearch.services.lexical_search import LexicalSearchService
+from txtsearch.services.literal_search import LiteralSearchService
 from txtsearch.services.semantic_search import SemanticSearchService
 
 
@@ -55,28 +56,39 @@ class SearchCommand:
 
     def __init__(
         self,
-        search_service: SemanticSearchService | LexicalSearchService,
+        search_service: SemanticSearchService | LexicalSearchService | LiteralSearchService,
         logger: structlog.stdlib.BoundLogger | None = None,
     ) -> None:
         self._search_service = search_service
         self._logger = logger or structlog.get_logger(__name__)
 
-    async def run(self, input: SearchInput) -> SearchOutput:
+    async def run(
+        self,
+        input: SearchInput,
+        search_dir: Path | None = None,
+    ) -> SearchOutput:
         """Search for documents matching the query.
 
         Args:
             input: SearchInput with query and options.
+            search_dir: Directory to search (required for LITERAL strategy).
 
         Returns:
             SearchOutput with search hits.
 
         Raises:
             StrategyNotSupportedError: If strategy is not implemented.
+            ValueError: If LITERAL strategy used without search_dir.
         """
-        supported_strategies = {SearchStrategy.SEMANTIC, SearchStrategy.LEXICAL}
+        supported_strategies = {
+            SearchStrategy.SEMANTIC,
+            SearchStrategy.LEXICAL,
+            SearchStrategy.LITERAL,
+        }
         if input.strategy not in supported_strategies:
             raise StrategyNotSupportedError(
-                f"Strategy '{input.strategy.value}' is not yet implemented. Use 'semantic' or 'lexical' strategy."
+                f"Strategy '{input.strategy.value}' is not yet implemented. "
+                f"Use 'semantic', 'lexical', or 'literal' strategy."
             )
 
         self._logger.info(
@@ -95,7 +107,13 @@ class SearchCommand:
             include_snippets=input.include_snippets,
         )
 
-        hits = await self._search_service.search(query_obj)
+        if input.strategy == SearchStrategy.LITERAL:
+            if search_dir is None:
+                raise ValueError("search_dir is required for LITERAL strategy")
+            literal_service: LiteralSearchService = self._search_service  # type: ignore[assignment]
+            hits = await literal_service.search(query_obj, search_dir)
+        else:
+            hits = await self._search_service.search(query_obj)
 
         self._logger.info(
             "search_command_completed",

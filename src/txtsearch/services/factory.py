@@ -14,6 +14,8 @@ from txtsearch.services.file_walker import FileWalker
 from txtsearch.services.index import IndexingService
 from txtsearch.services.lexical_search import LexicalSearchService
 from txtsearch.services.lexical_store import LexicalStore
+from txtsearch.services.literal_search import LiteralSearchService
+from txtsearch.services.literal_store import LiteralStore
 from txtsearch.services.metadata_store import MetadataStore, create_async_engine_from_path
 from txtsearch.services.semantic_search import SemanticSearchService
 from txtsearch.services.vector_store import VectorStore
@@ -300,6 +302,58 @@ def create_test_lexical_search_service() -> LexicalSearchService:
 
     return LexicalSearchService(
         lexical_store=lexical_store,
+        metadata_store=metadata_store,
+        logger=logger,
+    )
+
+
+def create_literal_search_service(
+    index_dir: Path,
+) -> LiteralSearchService:
+    """Create a production LiteralSearchService.
+
+    Uses the same SQLite metadata storage as other services for document
+    lookup, and ripgrep for pattern matching on the filesystem.
+
+    Args:
+        index_dir: Directory containing index files (meta.db).
+
+    Returns:
+        Configured LiteralSearchService ready for use.
+    """
+    logger = structlog.get_logger(__name__)
+
+    db_path = index_dir / METADATA_DB_FILENAME
+    engine = create_async_engine_from_path(str(db_path))
+    metadata_store = MetadataStore(engine=engine, logger=logger)
+
+    literal_store = LiteralStore(logger=logger)
+
+    return LiteralSearchService(
+        literal_store=literal_store,
+        metadata_store=metadata_store,
+        logger=logger,
+    )
+
+
+def create_test_literal_search_service() -> LiteralSearchService:
+    """Create a LiteralSearchService with in-memory storage for testing.
+
+    Uses in-memory SQLite for metadata. Note that this still requires
+    the ripgrep binary to be available on the system for actual searches.
+
+    Returns:
+        Configured LiteralSearchService with in-memory metadata storage.
+    """
+    logger = structlog.get_logger(__name__)
+
+    engine = create_async_engine_from_path(":memory:")
+    metadata_store = MetadataStore(engine=engine, logger=logger)
+
+    literal_store = LiteralStore(logger=logger)
+
+    return LiteralSearchService(
+        literal_store=literal_store,
         metadata_store=metadata_store,
         logger=logger,
     )

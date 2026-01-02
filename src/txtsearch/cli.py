@@ -26,10 +26,12 @@ from txtsearch.models.enums import SearchStrategy
 from txtsearch.services.factory import (
     create_indexing_service,
     create_lexical_search_service,
+    create_literal_search_service,
     create_semantic_search_service,
     parse_file_pattern,
 )
 from txtsearch.services.lexical_search import LexicalIndexNotFoundError
+from txtsearch.services.literal_store import RipgrepNotFoundError
 
 
 structlog.configure(
@@ -85,9 +87,14 @@ async def _run_index_command(
 async def _run_search_command(
     input: SearchInput,
     index_dir: Path,
+    search_dir: Path,
 ) -> SearchOutput:
     """Execute the search command with the given input."""
-    if input.strategy == SearchStrategy.LEXICAL:
+    if input.strategy == SearchStrategy.LITERAL:
+        async with create_literal_search_service(index_dir=index_dir) as service:
+            command = SearchCommand(search_service=service)
+            return await command.run(input, search_dir=search_dir)
+    elif input.strategy == SearchStrategy.LEXICAL:
         async with create_lexical_search_service(index_dir=index_dir) as service:
             command = SearchCommand(search_service=service)
             return await command.run(input)
@@ -209,7 +216,7 @@ def search(
     )
 
     try:
-        output = asyncio.run(_run_search_command(input_dto, index_dir))
+        output = asyncio.run(_run_search_command(input_dto, index_dir, search_dir))
     except IndexNotFoundError:
         # This shouldn't happen since we check above, but handle it gracefully
         logger.error("index_not_found", index_dir=str(index_dir))
@@ -217,6 +224,10 @@ def search(
         raise typer.Exit(1)
     except LexicalIndexNotFoundError as e:
         logger.error("lexical_index_not_found", index_dir=str(index_dir))
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    except RipgrepNotFoundError as e:
+        logger.error("ripgrep_not_found")
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
     except StrategyNotSupportedError as e:
