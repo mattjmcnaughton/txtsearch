@@ -2,7 +2,7 @@
 
 Orchestrates full-text search via DuckDB, hydrates results with metadata
 from SQLite, and returns normalized SearchHit objects for consumption by
-higher layers (CLI, API, MCP).
+higher layers (CLI, API).
 """
 
 from uuid import uuid4

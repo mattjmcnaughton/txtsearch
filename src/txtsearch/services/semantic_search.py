@@ -2,7 +2,7 @@
 
 Orchestrates vector similarity search via ChromaDB, hydrates results with
 metadata from SQLite, and returns normalized SearchHit objects for consumption
-by higher layers (CLI, API, MCP).
+by higher layers (CLI, API).
 """
 
 from uuid import uuid4
